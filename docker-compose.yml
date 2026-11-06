@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16
+    container_name: ecommerce_dw_db
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: dw
+      POSTGRES_PASSWORD: dw
+      POSTGRES_DB: ecommerce_dw
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

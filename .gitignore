@@ -1,0 +1,30 @@
+# Môi trường
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Dữ liệu gốc (tải từ Kaggle, không commit)
+data/raw/*
+!data/raw/.gitkeep
+
+# Mọi file CSV/zip đều không commit, trừ dữ liệu mẫu và số liệu cho báo cáo
+*.csv
+*.zip
+!data/sample/*.csv
+!reports/metrics/*.csv
+
+# Model đã train
+artifacts/*
+!artifacts/models/
+artifacts/models/*
+!artifacts/models/.gitkeep
+*.pkl
+*.joblib
+
+# Notebook / IDE
+.ipynb_checkpoints/
+.vscode/
+.idea/
+.DS_Store

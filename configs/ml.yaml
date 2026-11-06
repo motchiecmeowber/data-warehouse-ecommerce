@@ -1,0 +1,15 @@
+# Cấu hình ML (C)
+split:                      # chia theo thời gian, KHÔNG chia ngẫu nhiên
+  train_start: "2017-01-01"
+  train_end: "2018-04-30"
+  test_start: "2018-05-01"
+  test_end: "2018-08-31"
+
+target: is_late             # ngày giao thực tế > ngày hẹn giao
+
+models:
+  - logistic_regression
+  - random_forest
+  - lightgbm
+
+random_state: 42
