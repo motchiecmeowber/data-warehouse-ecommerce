@@ -145,7 +145,7 @@ Bản ghi cha không có bản ghi con:
 
 | # | Bảng.cột | Vấn đề | Số lượng | Tiêu chí chất lượng | Cách xử lý dự kiến |
 |---|---|---|---|---|---|
-| 1 | Các cột ngày giờ (orders, order_items, order_reviews) | Đọc thành chuỗi | 9 cột | Hợp lệ (kiểu dữ liệu) | Ép sang timestamp |
+| 1 | Các cột ngày giờ (orders, order_items, order_reviews) | Đọc thành chuỗi | 8 cột | Hợp lệ (kiểu dữ liệu) | Ép sang timestamp |
 | 2 | customers/sellers/geolocation.*_zip_code_prefix | Đọc thành số, mất số 0 ở đầu | 3 cột | Nhất quán | Đọc dạng chuỗi, bù 0 cho đủ 5 chữ số |
 | 3 | orders (delivered) | Thiếu mốc thời gian | 14 / 2 / 8 đơn | Đầy đủ | Giữ đơn, gắn cờ bất thường, không tính vào chỉ số giao hàng |
 | 4 | products.product_category_name | Thiếu danh mục | 610 sản phẩm | Đầy đủ | Gán `unknown` |
@@ -166,3 +166,73 @@ Bản ghi cha không có bản ghi con:
 | 19 | geolocation | Tọa độ ngoài Brazil | 42 dòng | Hợp lệ | Loại trước khi gom tọa độ |
 | 20 | geolocation/sellers.*_city | Tên có dấu, khoảng trắng thừa, nhiều cách viết | 73.442 + 3 dòng; 8.556 mã | Nhất quán | Bỏ dấu, viết thường, cắt khoảng trắng; mỗi mã lấy tên xuất hiện nhiều nhất |
 | 21 | geolocation | Một mã thuộc nhiều bang | 8 mã | Nhất quán | Lấy bang xuất hiện nhiều nhất |
+| 22 | sellers.seller_city | Tên bẩn: kèm bang (`auriflama/sp`, `rio de janeiro / rio de janeiro`), toàn số (`04482255`) | 15+ người bán | Hợp lệ, nhất quán | Lấy thành phố từ `dim_geography` theo mã bưu điện |
+| 23 | sellers.seller_state | Khác bang trong geolocation của cùng mã; 17 mã của người bán ứng với nhiều bang | 35 người bán | Nhất quán | Lấy bang từ `dim_geography` theo mã bưu điện |
+
+## Quy tắc tiền xử lý
+
+### Nguyên tắc chung
+
+- **Staging giữ nguyên bản gốc:** mọi cột nạp vào staging ở dạng chuỗi (text), không ép kiểu, không sửa giá trị.
+- **Mọi xử lý thực hiện ở bước chuyển staging → dw** (Transform).
+- **Lỗi ở từng dòng không làm dừng ETL:** dòng lỗi được ghi vào `etl_log.error_queue` (kèm mã quy tắc), ETL chạy tiếp các dòng còn lại.
+
+### Nhóm 1 – Kiểu dữ liệu và định dạng
+
+| Mã | Vấn đề | Bảng.cột | Điều kiện | Hành động |
+|---|---|---|---|---|
+| R01 | 1 | orders.order_purchase_timestamp, order_approved_at, order_delivered_carrier_date, order_delivered_customer_date, order_estimated_delivery_date; order_items.shipping_limit_date; order_reviews.review_creation_date, review_answer_timestamp | Mọi giá trị | Ép sang `TIMESTAMP`. Giá trị khác null nhưng không ép được → để null, ghi `error_queue` |
+| R02 | 2 | customers.customer_zip_code_prefix, sellers.seller_zip_code_prefix, geolocation.geolocation_zip_code_prefix | Mọi giá trị | Lưu dạng chuỗi; bù số 0 ở đầu cho đủ 5 ký tự (`LPAD(zip, 5, '0')`) |
+
+### Nhóm 2 – Thiếu dữ liệu
+
+| Mã | Vấn đề | Bảng.cột | Điều kiện | Hành động |
+|---|---|---|---|---|
+| R03 | 3 | orders (đơn delivered) | `order_status = 'delivered'` và thiếu một trong các mốc `order_approved_at`, `order_delivered_carrier_date`, `order_delivered_customer_date` | Vẫn nạp đơn; gắn cờ `has_missing_milestone = true`; **không điền giá trị thay thế** (thay thế làm sai các chỉ số thời gian) |
+| R04 | 3 | Chỉ số giao hàng của đơn | `order_delivered_customer_date` null | Không tính số ngày giao và trạng thái trễ (để null), không đưa vào chỉ tiêu giao hàng. Đơn chỉ thiếu ngày duyệt hoặc ngày giao cho vận chuyển vẫn tính bình thường |
+| R05 | 4 | products.product_category_name | Null | Gán `unknown` |
+| R06 | 4 | products.product_name_lenght, product_description_lenght, product_photos_qty | Null | Giữ null (không gán 0) |
+| R07 | 5 | products.product_weight_g | `= 0` | Đổi thành null; không điền giá trị thay thế |
+| R08 | 5 | products.product_weight_g, length/height/width_cm | Null | Giữ null; không điền giá trị thay thế |
+| R09 | 6 | order_reviews.review_comment_title, review_comment_message | Null | Giữ null |
+| R10 | 6 | order_reviews | Mọi dòng | Tạo cột `has_comment = true` khi tiêu đề hoặc bình luận khác null |
+
+### Nhóm 3 – Trùng lặp và khóa
+
+| Mã | Vấn đề | Bảng.cột | Điều kiện | Hành động |
+|---|---|---|---|---|
+| R11 | 7 | customers.customer_unique_id | Mọi dòng | Dùng `customer_unique_id` làm khóa nghiệp vụ của `dim_customer`; `customer_id` chỉ dùng để nối đơn với khách |
+| R12 | 7 | customers (khách có nhiều mã bưu điện) | Cùng `customer_unique_id` nhưng khác `customer_zip_code_prefix` giữa các đơn | SCD Type 2: mỗi địa chỉ là một phiên bản (`valid_from`, `valid_to`, `is_current`), mốc hiệu lực là ngày đặt đơn; fact trỏ tới phiên bản đúng tại thời điểm mua |
+| R13 | 8 | order_reviews (một đơn nhiều review) | Cùng `order_id` có nhiều dòng | Giữ review có `review_answer_timestamp` mới nhất |
+| R14 | 8 | order_reviews (một review nhiều đơn) | Cùng `review_id` gắn nhiều `order_id` | Giữ review cho mọi đơn |
+| R15 | 9 | geolocation | Dòng trùng hoàn toàn | Xóa |
+| R16 | 9 | geolocation (một mã nhiều tọa độ) | Cùng `geolocation_zip_code_prefix` | Gom 1 dòng mỗi mã: lat, lng lấy **trung vị** (tính sau khi loại tọa độ ngoài Brazil) |
+
+### Nhóm 4 – Toàn vẹn tham chiếu
+
+| Mã | Vấn đề | Bảng.cột | Điều kiện | Hành động |
+|---|---|---|---|---|
+| R17 | 10 | product_category_name_translation | Danh mục có trong products nhưng không có bản dịch | Tự bổ sung bản dịch: `pc_gamer` → `pc_gamer`; `portateis_cozinha_e_preparadores_de_alimentos` → `portable_kitchen_and_food_preparers` |
+| R18 | 11 | customers/sellers.*_zip_code_prefix | Mã không có trong geolocation | Vẫn tạo dòng địa lý: thành phố, bang lấy từ customers/sellers; tọa độ null |
+| R19 | 12 | orders (không có order_items) | Đơn không xuất hiện trong order_items | Không nạp vào `fact_sales`; vẫn nạp vào `fact_order_fulfillment` |
+| R20 | 12 | orders (không có order_items, trạng thái bất thường) | Như R19 và `order_status` không phải `unavailable` hoặc `canceled` | Ghi `error_queue` |
+| R21 | 13 | orders (delivered, không có thanh toán) | Đơn không xuất hiện trong order_payments | Vẫn nạp đơn; ghi `error_queue` |
+
+### Nhóm 5 – Giá trị bất thường và nhất quán
+
+| Mã | Vấn đề | Bảng.cột | Điều kiện | Hành động |
+|---|---|---|---|---|
+| R22 | 14 | orders | Mốc thời gian sai thứ tự: giao vận chuyển trước khi đặt hoặc trước khi duyệt; khách nhận trước khi giao vận chuyển | Giữ đơn và giữ nguyên các ngày; gắn cờ `has_time_anomaly = true` |
+| R23 | 14 | Chỉ số giao hàng của đơn | Đơn có cờ `has_time_anomaly` | Vẫn tính vào chỉ số giao hàng (tổng thời gian từ lúc đặt đến lúc khách nhận); khoảng thời gian trung gian bị âm để null |
+| R24 | 15 | orders | `order_status <> 'delivered'` nhưng có `order_delivered_customer_date` | Giữ nguyên trạng thái và ngày; gắn cờ `has_time_anomaly = true` |
+| R25 | 16 | order_items.shipping_limit_date | Sau 2018-12-31 | Giữ giá trị; gắn cờ `is_shipping_limit_anomaly = true`; cột này không nối với `dim_date` |
+| R26 | 17 | order_payments.payment_installments | `= 0` | Đổi thành 1 |
+| R27 | 17 | order_payments.payment_type | `= 'not_defined'` | Đổi thành `unknown` |
+| R28 | 17 | order_payments.payment_value | `= 0` | Giữ nguyên |
+| R29 | 19 | geolocation | Tọa độ ngoài khung Brazil (lat < -33,8 hoặc > 5,3; lng < -74,0 hoặc > -34,7) | Loại trước khi gom tọa độ (R16) |
+| R30 | 20 | customers.customer_city, sellers.seller_city, geolocation.geolocation_city | Mọi giá trị | Bỏ dấu, viết thường, cắt khoảng trắng |
+| R31 | 20 | geolocation (một mã nhiều tên thành phố) | Cùng mã có nhiều tên sau khi chuẩn hóa (R30) | Lấy tên xuất hiện nhiều nhất |
+| R32 | 21 | geolocation (một mã nhiều bang) | Cùng mã có nhiều `geolocation_state` | Lấy bang xuất hiện nhiều nhất |
+| R33 | — | order_items.freight_value | `= 0` (383 dòng) | Giữ nguyên: miễn phí vận chuyển, hợp lệ |
+| R34 | 22 | sellers.seller_city | Mọi dòng | Không dùng `seller_city`; thành phố lấy từ `dim_geography` theo mã bưu điện. Riêng người bán có mã không nằm trong geolocation (R18): cắt phần sau dấu `/` hoặc `\`, áp R30; giá trị toàn số → `unknown` |
+| R35 | 23 | sellers.seller_state | Mọi dòng | Không dùng `seller_state`; bang lấy từ `dim_geography` theo mã bưu điện (R32). Riêng người bán có mã không nằm trong geolocation (R18): dùng `seller_state` |
