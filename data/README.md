@@ -9,7 +9,7 @@
 **Cách 2 – dòng lệnh** (chạy ở thư mục gốc repo):
 
 ```bash
-curl -L -o data/raw/olist.zip https://www.kaggle.com/api/v1/datasets/download/olistbr/brazilian-ecommerce
+curl -fL --retry 3 -o data/raw/olist.zip https://www.kaggle.com/api/v1/datasets/download/olistbr/brazilian-ecommerce
 unzip -o data/raw/olist.zip -d data/raw
 ```
 

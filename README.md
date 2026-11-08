@@ -42,6 +42,8 @@ data-warehouse-ecommerce/
 │   └── sample/                      # Bộ mẫu ~1.500 đơn, giữ đúng quan hệ khóa (có commit)
 │
 ├── src/
+│   ├── profiling/                   # Khảo sát dữ liệu nguồn (step1_..., step2_...)
+│   │
 │   ├── common/                      # Dùng chung
 │   │   ├── config.py                # Đọc .env và configs/*.yaml
 │   │   └── db.py                    # Kết nối DB, chạy file SQL
@@ -88,13 +90,13 @@ data-warehouse-ecommerce/
 │       └── pages/                   # Tổng quan, Logistics, Người bán, OLAP, Mô hình ML, DSS
 │
 ├── artifacts/models/                # Model đã train (không commit)
-├── notebooks/                       # EDA và thử nghiệm
 ├── tests/                           # Kiểm thử ETL và chống leakage
 ├── reports/
 │   ├── figures/                     # Biểu đồ cho báo cáo
 │   └── metrics/                     # Số liệu đánh giá mô hình
 └── docs/
     ├── schema/                      # Sơ đồ star schema
+    ├── data_profiling.md            # Kết quả khảo sát dữ liệu nguồn
     ├── bus_matrix.md
     ├── data_dictionary.md
     ├── etl_flow.md

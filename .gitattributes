@@ -1,0 +1,8 @@
+# Lưu mọi file văn bản trong repo với ký tự xuống dòng LF (Windows, WSL, macOS dùng chung)
+* text=auto eol=lf
+
+# File nhị phân: không chuyển đổi
+*.png binary
+*.jpg binary
+*.pdf binary
+*.zip binary
