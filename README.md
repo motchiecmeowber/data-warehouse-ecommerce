@@ -97,6 +97,7 @@ data-warehouse-ecommerce/
 └── docs/
     ├── schema/                      # Sơ đồ star schema
     ├── data_profiling.md            # Kết quả khảo sát dữ liệu nguồn
+    ├── dw_design.md                 # Quyết định thiết kế kho dữ liệu
     ├── bus_matrix.md
     ├── data_dictionary.md
     ├── etl_flow.md
