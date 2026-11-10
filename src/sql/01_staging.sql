@@ -78,3 +78,16 @@ CREATE TABLE IF NOT EXISTS staging.product_category_name_translation (
     product_category_name           TEXT,
     product_category_name_english   TEXT
 );
+
+-- Dữ liệu tham chiếu nhóm tự bổ sung (data/reference).
+CREATE TABLE IF NOT EXISTS staging.ref_brazil_states (
+    state_code                      TEXT,
+    state_name                      TEXT,
+    region                          TEXT
+);
+
+CREATE TABLE IF NOT EXISTS staging.ref_brazil_holidays (
+    holiday_date                    TEXT,
+    holiday_name                    TEXT,
+    holiday_type                    TEXT
+);

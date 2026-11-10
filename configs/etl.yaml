@@ -1,4 +1,5 @@
-# Cấu hình ETL (A)
+# Cấu hình ETL
+# raw_files: tên bảng staging -> tên file CSV
 raw_files:
   orders: olist_orders_dataset.csv
   order_items: olist_order_items_dataset.csv
@@ -8,7 +9,14 @@ raw_files:
   sellers: olist_sellers_dataset.csv
   products: olist_products_dataset.csv
   geolocation: olist_geolocation_dataset.csv
-  category_translation: product_category_name_translation.csv
+  product_category_name_translation: product_category_name_translation.csv
+
+# Dữ liệu tham chiếu nhóm tự bổ sung (commit lên git), luôn đọc từ data/reference
+# reference_files: tên bảng staging -> tên file CSV
+reference_dir: data/reference
+reference_files:
+  ref_brazil_states: brazil_states.csv
+  ref_brazil_holidays: brazil_holidays.csv
 
 # Khung tọa độ Brazil dùng để loại điểm geolocation bất thường
 brazil_bbox:
@@ -16,8 +24,3 @@ brazil_bbox:
   lat_max: 5.3
   lng_min: -74.0
   lng_max: -34.7
-
-# Khoảng thời gian dữ liệu đủ dày để phân tích
-analysis_period:
-  start: "2017-01-01"
-  end: "2018-08-31"

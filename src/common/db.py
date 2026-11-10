@@ -20,10 +20,12 @@ def has_statements(sql: str) -> bool:
     return bool(without_comments.strip().strip(";").strip())
 
 
-def run_sql_file(engine: Engine, path: str | Path) -> bool:
+def run_sql_file(engine: Engine, path: str | Path, settings: dict[str, object] | None = None) -> bool:
     """Chạy nguyên văn một file SQL qua cursor của psycopg2.
 
     Không dùng sqlalchemy.text() vì nó coi ':ten' là tham số và có thể làm hỏng câu lệnh.
+    settings: biến cấu hình cho file SQL, vd. {"etl.run_id": 5}; trong SQL đọc bằng
+    current_setting('etl.run_id'). Biến chỉ tồn tại trong giao dịch chạy file này.
     Trả về False nếu file chưa có câu lệnh nào.
     """
     sql = Path(path).read_text(encoding="utf-8")
@@ -32,6 +34,8 @@ def run_sql_file(engine: Engine, path: str | Path) -> bool:
     conn = engine.raw_connection()
     try:
         with conn.cursor() as cur:
+            for name, value in (settings or {}).items():
+                cur.execute("SELECT set_config(%s, %s, true)", (name, str(value)))
             cur.execute(sql)
         conn.commit()
     finally:

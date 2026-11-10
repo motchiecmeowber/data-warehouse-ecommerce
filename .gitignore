@@ -13,6 +13,7 @@ data/raw/*
 *.csv
 *.zip
 !data/sample/*.csv
+!data/reference/*.csv
 !reports/metrics/*.csv
 
 # Model đã train
