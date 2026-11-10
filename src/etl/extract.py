@@ -16,18 +16,12 @@ def read_header(path: Path) -> list[str]:
 def load_table(conn, table: str, path: Path) -> int:
     columns = ", ".join(f'"{name}"' for name in read_header(path))
     copy_sql = f"COPY staging.{table} ({columns}) FROM STDIN WITH (FORMAT csv, HEADER true)"
-    try:
-        with conn.cursor() as cur:
-            cur.execute(f"TRUNCATE staging.{table}")
-            with open(path, encoding="utf-8-sig", newline="") as f:
-                cur.copy_expert(copy_sql, f)
-            cur.execute(f"SELECT count(*) FROM staging.{table}")
-            rows = cur.fetchone()[0]
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    return rows
+    with conn.cursor() as cur:
+        cur.execute(f"TRUNCATE staging.{table}")
+        with open(path, encoding="utf-8-sig", newline="") as f:
+            cur.copy_expert(copy_sql, f)
+        cur.execute(f"SELECT count(*) FROM staging.{table}")
+        return cur.fetchone()[0]
 
 def extract(engine, data_dir: Path = RAW_DATA_DIR) -> dict[str, int]:
     config = load_yaml("etl.yaml")
@@ -35,11 +29,16 @@ def extract(engine, data_dir: Path = RAW_DATA_DIR) -> dict[str, int]:
     reference_dir = ROOT_DIR / config["reference_dir"]
     files |= {table: reference_dir / name for table, name in config["reference_files"].items()}
 
+    # Cả 11 bảng trong 1 giao dịch: lỗi ở bất kỳ file nào thì staging giữ nguyên dữ liệu cũ
     counts = {}
     conn = engine.raw_connection()
     try:
         for table, path in files.items():
             counts[table] = load_table(conn, table, path)
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
     finally:
         conn.close()
     return counts

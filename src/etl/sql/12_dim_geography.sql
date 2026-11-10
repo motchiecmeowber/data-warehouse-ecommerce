@@ -13,19 +13,15 @@ WITH bbox AS (
         current_setting('etl.lng_max')::numeric AS lng_max
 ),
 geo AS (
-    -- R15: bỏ dòng trùng hoàn toàn; R02: bù 0; R30: bỏ dấu, viết thường, cắt khoảng trắng
+    -- staging.geolocation_typed đã bỏ dòng trùng (R15); R02: bù 0; R30: bỏ dấu, viết thường, cắt khoảng trắng
     SELECT
-        lpad(zip, 5, '0')                       AS zip,
-        lat::numeric                            AS lat,
-        lng::numeric                            AS lng,
+        lpad(zip_code_prefix, 5, '0')           AS zip,
+        lat,
+        lng,
         lower(trim(unaccent(city)))             AS city,
         upper(trim(state))                      AS state
-    FROM (
-        SELECT DISTINCT
-            geolocation_zip_code_prefix AS zip, geolocation_lat AS lat, geolocation_lng AS lng,
-            geolocation_city AS city, geolocation_state AS state
-        FROM staging.geolocation
-    ) AS d
+    FROM staging.geolocation_typed
+    WHERE zip_code_prefix IS NOT NULL
 ),
 geo_by_zip AS (
     SELECT
@@ -48,6 +44,7 @@ other AS (
         lower(trim(unaccent(customer_city)))    AS city,
         upper(trim(customer_state))             AS state
     FROM staging.customers
+    WHERE customer_zip_code_prefix IS NOT NULL
     UNION ALL
     SELECT
         lpad(s.seller_zip_code_prefix, 5, '0'),
@@ -58,14 +55,16 @@ other AS (
     CROSS JOIN LATERAL (
         SELECT lower(trim(unaccent(split_part(replace(s.seller_city, '\', '/'), '/', 1)))) AS city
     ) AS c
+    WHERE s.seller_zip_code_prefix IS NOT NULL
 ),
 other_by_zip AS (
     SELECT
         zip,
         mode() WITHIN GROUP (ORDER BY city)     AS city,
         mode() WITHIN GROUP (ORDER BY state)    AS state
-    FROM other
-    WHERE zip NOT IN (SELECT zip FROM geo_by_zip)
+    FROM other o
+    -- NOT EXISTS thay cho NOT IN: NOT IN trả về rỗng nếu danh sách có giá trị null
+    WHERE NOT EXISTS (SELECT 1 FROM geo_by_zip g WHERE g.zip = o.zip)
     GROUP BY zip
 ),
 all_zips AS (

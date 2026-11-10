@@ -60,7 +60,7 @@ data-warehouse-ecommerce/
 │   │
 │   ├── etl/                         # CSV → staging → dw
 │   │   ├── extract.py
-│   │   ├── sql/                     # Biến đổi staging → dw (R01–R36): 0x ép kiểu, 1x dimension, 2x fact
+│   │   ├── sql/                     # Biến đổi staging → dw (R01–R36): 0x ép kiểu, 1x dimension, 2x fact, 3x kiểm tra chất lượng
 │   │   ├── load_dimensions.py
 │   │   ├── load_facts.py
 │   │   ├── quality_checks.py

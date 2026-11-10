@@ -1,5 +1,5 @@
 """
-Chạy pipeline ETL: extract -> nạp dimension (nạp fact, kiểm tra chất lượng: bổ sung sau).
+Chạy pipeline ETL: extract -> nạp dimension -> nạp fact -> kiểm tra chất lượng.
 Mỗi lần chạy ghi 1 dòng vào etl_log.run_history; dòng dữ liệu lỗi ghi vào etl_log.error_queue.
 """
 
@@ -11,7 +11,8 @@ from src.common.config import RAW_DATA_DIR
 from src.common.db import get_engine
 from src.etl.extract import extract
 from src.etl.load_dimensions import load_dimensions
-
+from src.etl.load_facts import load_facts
+from src.etl.quality_checks import run_quality_checks
 
 def start_run(engine, data_source: str) -> int:
     with engine.begin() as conn:
@@ -50,6 +51,30 @@ def print_errors(engine, run_id: int) -> None:
         print("  (không có lỗi)")
 
 
+def print_checks(checks: list[tuple]) -> None:
+    print("\nquality_check")
+    for category, check_name, expected, actual, passed in checks:
+        mark = "ĐẠT     " if passed else "KHÔNG ĐẠT"
+        print(f"  {mark} [{category}] {check_name}: mong đợi {expected}, thực tế {actual}")
+
+
+def transform_and_load(engine, run_id: int) -> list[tuple]:
+    # Nạp dimension, fact và kiểm tra chất lượng trong 1 giao dịch: lỗi ở bất kỳ bước nào thì
+    # rollback toàn bộ, kho giữ nguyên dữ liệu của lần chạy thành công trước đó
+    conn = engine.raw_connection()
+    try:
+        print_counts("Dimension -> dw", load_dimensions(conn, run_id))
+        print_counts("Fact -> dw", load_facts(conn, run_id))
+        checks = run_quality_checks(conn, run_id)
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return checks
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Chạy pipeline ETL")
     parser.add_argument("--data-dir", default=RAW_DATA_DIR, help="thư mục chứa 9 file CSV (mặc định: data/raw)")
@@ -60,12 +85,19 @@ def main() -> None:
     print(f"run_id = {run_id}")
     try:
         print_counts("Extract -> staging", extract(engine, args.data_dir))
-        print_counts("Dimension -> dw", load_dimensions(engine, run_id))
-    except Exception as e:
-        finish_run(engine, run_id, "failed", str(e)[:1000])
+        checks = transform_and_load(engine, run_id)
+    except BaseException as e:  # BaseException: bắt cả Ctrl+C để không kẹt trạng thái running
+        finish_run(engine, run_id, "failed", (str(e) or type(e).__name__)[:1000])
         raise
-    finish_run(engine, run_id, "success")
     print_errors(engine, run_id)
+    print_checks(checks)
+
+    # Có kiểm tra không đạt: dữ liệu vẫn giữ, nhưng lần chạy ghi failed và lệnh trả mã lỗi 1
+    failed = [check_name for _, check_name, _, _, passed in checks if not passed]
+    if failed:
+        finish_run(engine, run_id, "failed", "Kiểm tra chất lượng không đạt: " + "; ".join(failed))
+        raise SystemExit(1)
+    finish_run(engine, run_id, "success")
 
 
 if __name__ == "__main__":
