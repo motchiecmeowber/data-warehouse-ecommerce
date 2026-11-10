@@ -236,3 +236,4 @@ Bản ghi cha không có bản ghi con:
 | R33 | — | order_items.freight_value | `= 0` (383 dòng) | Giữ nguyên: miễn phí vận chuyển, hợp lệ |
 | R34 | 22 | sellers.seller_city | Mọi dòng | Không dùng `seller_city`; thành phố lấy từ `dim_geography` theo mã bưu điện. Riêng người bán có mã không nằm trong geolocation (R18): cắt phần sau dấu `/` hoặc `\`, áp R30; giá trị toàn số → `unknown` |
 | R35 | 23 | sellers.seller_state | Mọi dòng | Không dùng `seller_state`; bang lấy từ `dim_geography` theo mã bưu điện (R32). Riêng người bán có mã không nằm trong geolocation (R18): dùng `seller_state` |
+| R36 | — | orders.order_purchase_timestamp | Null hoặc không ép được kiểu (R01); dữ liệu hiện tại: 0 dòng | Không nạp đơn vào các fact, ghi `error_queue`: đơn không có ngày đặt thì không có `purchase_date_key`, không tính được các khoảng thời gian |
