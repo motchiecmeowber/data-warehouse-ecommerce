@@ -62,7 +62,7 @@ Mỗi file chạy được bằng `psql -f` hoặc trong tab Truy vấn SQL củ
 | OLAP explorer | Chọn số đo và phân cấp (roll-up, drill-down bằng cách đổi mức chi tiết), slice, dice bằng bộ lọc, pivot, ROLLUP, tải CSV, xem SQL sinh ra; tab SQL chỉ đọc | `mv_sales_cube` |
 | Phân cụm khách hàng | Phân cụm khách hàng bằng K-Means theo RFM (P3) | `dw` |
 | DSS ngày hẹn giao | Gợi ý số ngày hẹn theo tuyến × danh mục, what-if, độ nhạy, tuyến cần xem lại | `v_fulfillment`, `v_review` |
-| What-if rủi ro trễ (ML) | Dời ngày hẹn của từng đơn rồi chấm lại bằng 3 mô hình của P3: số đơn bị cảnh báo trước/sau, đơn đổi nhãn, rủi ro từng đơn | `artifacts/models/late_risk/<run>` |
+| What-if rủi ro trễ (ML) | Dời ngày hẹn của từng đơn rồi chấm lại bằng 3 mô hình của P3: số đơn dự đoán bị trễ trước/sau, số đơn đổi dự đoán, rủi ro từng đơn | `artifacts/models/late_risk/<run>` |
 
 Biểu đồ dùng Altair, màu và font cấu hình trong `.streamlit/config.toml`. Mỗi tab chỉ chạy truy vấn khi được mở, kết quả truy vấn được cache 10 phút (tối đa 256 mục). Kiểm thử giao diện: `tests/test_app_pages.py`, `tests/test_charts.py`.
 
@@ -80,4 +80,4 @@ Trang DSS hiện tính từ phân phối thời gian giao thực tế trong kho 
 - Độ nhạy: xem gợi ý thay đổi ra sao khi mục tiêu nằm trong khoảng 1% đến 20%.
 - Hạn chế: giữ nguyên phân phối quá khứ; chưa mô hình hóa việc hẹn dài làm khách bỏ đơn; nhóm đơn hàng dưới 30 đơn thì không gợi ý.
 
-Trang **What-if rủi ro trễ (ML)** bổ sung góc nhìn theo từng đơn. Trang gọi `run_whatif` và `summarize` (`src/dss/whatif.py`) với model do `python -m src.ml.late_risk --output-dir artifacts/models/late_risk/run_01` tạo ra (xem `docs/dss_design.md`). Người dùng chọn lần train, đơn hàng (đơn mẫu `example_orders.csv` hoặc tải CSV) và số ngày dời hẹn từ -3 đến 10. Trang hiện số đơn bị cảnh báo trước và sau, số đơn đổi nhãn, đồ thị số cảnh báo theo số ngày dời, và rủi ro của từng đơn. Chưa có code hoặc model của P3 thì trang chỉ hiện hướng dẫn.
+Trang **What-if rủi ro trễ (ML)** bổ sung góc nhìn theo từng đơn. Trang gọi `run_whatif` và `summarize` (`src/dss/whatif.py`) với model do `python -m src.ml.late_risk --output-dir artifacts/models/late_risk/run_01` tạo ra (xem `docs/dss_design.md`). Người dùng chọn lần train, đơn hàng (đơn mẫu `example_orders.csv` hoặc tải CSV) và số ngày dời hẹn từ -3 đến 10. Trang hiện số đơn dự đoán bị trễ trước và sau, số đơn đổi dự đoán, đồ thị số đơn dự đoán trễ theo số ngày dời, và rủi ro của từng đơn. Chưa có code hoặc model của P3 thì trang chỉ hiện hướng dẫn.
