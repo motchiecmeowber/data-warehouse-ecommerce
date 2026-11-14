@@ -33,7 +33,7 @@ pages = {
     "Mô hình & hỗ trợ quyết định": [
         st.Page("pages/5_Mo_hinh_ML.py", title="Phân cụm khách hàng", icon=":material/groups:"),
         st.Page("pages/6_DSS_ngay_hen_giao.py", title="DSS ngày hẹn giao", icon=":material/lightbulb:"),
-        st.Page("pages/7_What_if_ML.py", title="What-if rủi ro trễ (ML)", icon=":material/model_training:"),
+        st.Page("pages/7_DSS_can_thiep_ML.py", title="DSS chọn đơn can thiệp (ML)", icon=":material/model_training:"),
     ],
 }
 st.navigation(pages).run()

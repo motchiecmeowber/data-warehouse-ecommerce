@@ -71,19 +71,27 @@ def test_dss_recommendation_changes_with_target():
     assert int(strict.split()[0]) > int(loose.split()[0])
 
 
-def test_ml_whatif_page_runs_p3_models():
+def _metric(at: AppTest, label: str) -> float:
+    return float(next(m.value for m in at.metric if m.label == label).replace(",", ""))
+
+
+def test_ml_intervention_page_runs_p3_models():
     pytest.importorskip("src.dss.whatif", reason="Chưa có code P3")
     from src.dss import whatif
-    if not hasattr(whatif, "run_whatif"):
+    if not hasattr(whatif, "score_orders"):
         pytest.skip("Chưa có code P3")
     from src.common.config import ARTIFACTS_DIR
-    if not list((ARTIFACTS_DIR / "models" / "late_risk").glob("*/manifest.json")):
+    if not list((ARTIFACTS_DIR / "models" / "late_risk").glob("*/seller_history.joblib")):
         pytest.skip("Chưa train model P3")
-    at = run("7_What_if_ML.py")
+    at = AppTest.from_file(str(PAGES / "7_DSS_can_thiep_ML.py"), default_timeout=600).run()
     assert_clean(at)
-    labels = {m.label for m in at.metric}
-    assert {"Số đơn đang xét", "Đơn dự đoán bị trễ"} <= labels
-    at.slider[0].set_value(10).run()
+    picked = _metric(at, "Đơn nên can thiệp")
+    assert 0 < picked <= 20                                     # năng lực mặc định 20 đơn/ngày
+    at.toggle(key="dss_unlimited").set_value(True).run()        # không giới hạn số đơn
     assert_clean(at)
-    at.segmented_control(key="whatif_model").set_value("random_forest").run()
+    assert _metric(at, "Đơn nên can thiệp") >= picked
+    at.number_input(key="dss_cost").set_value(1000.0).run()     # chi phí rất cao: không đơn nào đáng can thiệp
+    assert_clean(at)
+    assert _metric(at, "Đơn nên can thiệp") == 0
+    at.segmented_control(key="dss_model").set_value("random_forest").run()
     assert_clean(at)

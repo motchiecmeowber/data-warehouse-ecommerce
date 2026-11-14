@@ -92,6 +92,6 @@ with st.expander("Giả định và hạn chế"):
         "- Hẹn dài hơn không làm đổi thời gian giao thực tế và **chưa mô hình hóa** việc khách bỏ đơn vì hẹn lâu.\n"
         "- Điểm đánh giá kỳ vọng = điểm trung bình khi đúng hạn × (1 − tỷ lệ trễ) + điểm trung bình khi trễ × tỷ lệ trễ, lấy từ đánh giá của nhóm.\n"
         "- Chỉ tính đơn đã giao, đơn hợp lệ; nhóm dưới 30 đơn không được gợi ý.\n"
-        "- Trang này dùng thống kê từ kho, không dùng ML. What-if theo mô hình dự đoán rủi ro trễ từng đơn "
-        "nằm ở trang What-if rủi ro trễ (ML)."
+        "- Trang này dùng thống kê từ kho, không dùng ML. Quyết định theo từng đơn bằng mô hình dự đoán rủi ro trễ "
+        "nằm ở trang DSS chọn đơn can thiệp (ML)."
     )

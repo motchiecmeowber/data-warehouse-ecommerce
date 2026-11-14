@@ -3,6 +3,8 @@
 Màu mặc định của chuỗi lấy từ theme; chỉ dùng màu cố định cho ý nghĩa ngữ nghĩa (trễ = đỏ, đúng hạn = xanh).
 Mỗi biểu đồ khi hiển thị phải qua `show(chart, alt=...)` để có mô tả cho trình đọc màn hình.
 """
+from typing import Literal
+
 import altair as alt
 import pandas as pd
 import streamlit as st
@@ -88,13 +90,22 @@ def grouped_bar(df: pd.DataFrame, x: str, y: str, group: str, title: str, xlabel
     ).properties(title=title, height=height)
 
 
-def heatmap(df: pd.DataFrame, x: str, y: str, z: str, title: str, pct: bool = False, height: int = 420) -> alt.LayerChart:
-    base = alt.Chart(df).encode(x=alt.X(f"{x}:N", title=None), y=alt.Y(f"{y}:N", title=None))
+def heatmap(df: pd.DataFrame, x: str, y: str, z: str, title: str, pct: bool = False, height: int = 420, *,
+            labels: tuple[str, str, str] = ("Bang khách", "Bang người bán", "Tỷ lệ trễ"),
+            scheme: Literal["oranges", "greens"] = "oranges", axis_titles: bool = False, keep_order: bool = False) -> alt.LayerChart:
+    """Bảng nhiệt. labels = tên trục x, trục y và giá trị (dùng trong tooltip, và làm tên trục nếu axis_titles).
+
+    keep_order=True: giữ thứ tự dòng trong df thay vì xếp theo chữ cái.
+    """
+    xlabel, ylabel, zlabel = labels
+    sort = None if keep_order else alt.Undefined
+    base = alt.Chart(df).encode(x=alt.X(f"{x}:N", title=xlabel if axis_titles else None, sort=sort),
+                                y=alt.Y(f"{y}:N", title=ylabel if axis_titles else None, sort=sort))
     fmt = ".0%" if pct else ".1f"
     cells = base.mark_rect().encode(
-        color=alt.Color(f"{z}:Q", title=None, scale=alt.Scale(scheme="oranges"), legend=alt.Legend(format=fmt, orient="bottom")),
-        tooltip=[alt.Tooltip(f"{y}:N", title="Bang người bán"), alt.Tooltip(f"{x}:N", title="Bang khách"),
-                 alt.Tooltip(f"{z}:Q", title="Tỷ lệ trễ", format=".1%" if pct else ".1f")])
+        color=alt.Color(f"{z}:Q", title=None, scale=alt.Scale(scheme=scheme), legend=alt.Legend(format=fmt, orient="bottom")),
+        tooltip=[alt.Tooltip(f"{y}:N", title=ylabel), alt.Tooltip(f"{x}:N", title=xlabel),
+                 alt.Tooltip(f"{z}:Q", title=zlabel, format=".1%" if pct else ",.1f")])
     labels = base.mark_text(fontSize=11).encode(
         text=alt.Text(f"{z}:Q", format=fmt),
         color=alt.condition(alt.datum[z] > df[z].quantile(0.7), alt.value("white"), alt.value("black")))
@@ -109,6 +120,18 @@ def scatter(df: pd.DataFrame, x: str, y: str, size: str, color: str, tooltip: li
         size=alt.Size(f"{size}:Q", title=size_label, legend=None),
         color=alt.Color(f"{color}:N", title=color_label, legend=alt.Legend(orient="bottom")),
         tooltip=tooltip,
+    ).properties(title=title, height=height)
+
+
+def tornado(df: pd.DataFrame, title: str, height: int = 260) -> alt.Chart:
+    """Biểu đồ độ nhạy: df có cột parameter (tên giả định), change (nhãn mức đổi) và delta (thay đổi kết quả)."""
+    return alt.Chart(df).mark_bar().encode(
+        y=alt.Y("parameter:N", title=None, sort=None), yOffset=alt.YOffset("change:N"),
+        x=alt.X("delta:Q", title="Thay đổi lợi ích ròng so với kịch bản gốc"),
+        color=alt.Color("change:N", title=None, legend=alt.Legend(orient="bottom"),
+                        scale=alt.Scale(domain=["Giảm 20%", "Tăng 20%"], range=[GRAY, PRIMARY])),
+        tooltip=[alt.Tooltip("parameter:N", title="Giả định"), alt.Tooltip("change:N", title="Mức đổi"),
+                 alt.Tooltip("delta:Q", title="Thay đổi lợi ích ròng", format="+,.1f")],
     ).properties(title=title, height=height)
 
 
