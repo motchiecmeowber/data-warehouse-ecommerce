@@ -90,7 +90,7 @@ data-warehouse-ecommerce/
 │   └── app/                         # Dashboard + giao diện DSS (Streamlit)
 │       ├── app.py
 │       ├── components/
-│       └── pages/                   # Tổng quan, Logistics, Người bán, OLAP, Phân cụm khách hàng, DSS, What-if ML
+│       └── pages/                   # Tổng quan, Logistics, Người bán, OLAP, Phân cụm khách hàng, 2 trang DSS
 │
 ├── artifacts/models/                # Model đã train (không commit)
 ├── tests/                           # Kiểm thử ETL và chống leakage

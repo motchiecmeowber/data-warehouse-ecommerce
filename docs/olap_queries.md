@@ -62,7 +62,7 @@ Mỗi file chạy được bằng `psql -f` hoặc trong tab Truy vấn SQL củ
 | OLAP explorer | Chọn số đo và phân cấp (roll-up, drill-down bằng cách đổi mức chi tiết), slice, dice bằng bộ lọc, pivot, ROLLUP, tải CSV, xem SQL sinh ra; tab SQL chỉ đọc | `mv_sales_cube` |
 | Phân cụm khách hàng | Phân cụm khách hàng bằng K-Means theo RFM (P3) | `dw` |
 | DSS ngày hẹn giao | Gợi ý số ngày hẹn theo tuyến × danh mục, what-if, độ nhạy, tuyến cần xem lại | `v_fulfillment`, `v_review` |
-| What-if rủi ro trễ (ML) | Dời ngày hẹn của từng đơn rồi chấm lại bằng 3 mô hình của P3: số đơn dự đoán bị trễ trước/sau, số đơn đổi dự đoán, rủi ro từng đơn | `artifacts/models/late_risk/<run>` |
+| DSS chọn đơn can thiệp (ML) | Chấm xác suất trễ các đơn mua trong một ngày bằng 3 mô hình của P3, chọn đơn có lợi ích ròng dương trong giới hạn năng lực, what-if theo chi phí × hiệu quả, độ nhạy ±20%, tuyến và người bán rủi ro, đối chiếu thực tế | `dw`, `artifacts/models/late_risk/<run>` |
 
 Biểu đồ dùng Altair, màu và font cấu hình trong `.streamlit/config.toml`. Mỗi tab chỉ chạy truy vấn khi được mở, kết quả truy vấn được cache 10 phút (tối đa 256 mục). Kiểm thử giao diện: `tests/test_app_pages.py`, `tests/test_charts.py`.
 
@@ -72,7 +72,9 @@ Bộ lọc chung ở thanh bên gồm khoảng tháng, vùng, bang, danh mục v
 
 ## 5. Trang DSS
 
-Trang DSS hiện tính từ phân phối thời gian giao thực tế trong kho (`src/olap/dss_baseline.py`), chưa dùng ML:
+### DSS ngày hẹn giao
+
+Trang này tính từ phân phối thời gian giao thực tế trong kho (`src/olap/dss_baseline.py`), chưa dùng ML:
 
 - Quyết định: số ngày hẹn giao P cho một tuyến × danh mục.
 - Tỷ lệ trễ(P) = tỷ lệ đơn đã giao có `delivery_days > P`. Gợi ý = P nhỏ nhất để tỷ lệ trễ ≤ mục tiêu do người dùng đặt.
@@ -80,4 +82,14 @@ Trang DSS hiện tính từ phân phối thời gian giao thực tế trong kho 
 - Độ nhạy: xem gợi ý thay đổi ra sao khi mục tiêu nằm trong khoảng 1% đến 20%.
 - Hạn chế: giữ nguyên phân phối quá khứ; chưa mô hình hóa việc hẹn dài làm khách bỏ đơn; nhóm đơn hàng dưới 30 đơn thì không gợi ý.
 
-Trang **What-if rủi ro trễ (ML)** bổ sung góc nhìn theo từng đơn. Trang gọi `run_whatif` và `summarize` (`src/dss/whatif.py`) với model do `python -m src.ml.late_risk --output-dir artifacts/models/late_risk/run_01` tạo ra (xem `docs/dss_design.md`). Người dùng chọn lần train, đơn hàng (đơn mẫu `example_orders.csv` hoặc tải CSV) và số ngày dời hẹn từ -3 đến 10. Trang hiện số đơn dự đoán bị trễ trước và sau, số đơn đổi dự đoán, đồ thị số đơn dự đoán trễ theo số ngày dời, và rủi ro của từng đơn. Chưa có code hoặc model của P3 thì trang chỉ hiện hướng dẫn.
+### DSS chọn đơn can thiệp (ML)
+
+Trang này ra quyết định theo từng đơn, dùng mô hình rủi ro trễ và K-Means của P3 (cách tính: `docs/dss_design.md`). Trang chỉ gọi hàm của P3 và hiển thị:
+
+- Đầu vào: lần huấn luyện (`artifacts/models/late_risk/<run>`, tạo bằng `python -m src.ml.late_risk --output-dir artifacts/models/late_risk/full_fit`), ngày mua của các đơn cần xét, thiệt hại cơ sở, chi phí, hiệu quả và số đơn xử lý được trong ngày, hệ số thiệt hại theo nhóm khách.
+- Dữ liệu: `load_orders(conn, decision_day=...)` đọc đơn trong ngày từ DW, `seller_history` thêm lịch sử người bán từ `seller_history.joblib`. Nhóm khách lấy từ `run_kmeans` trên các đơn từ 2016 đến hết năm trước ngày quyết định (lưu ở `artifacts/kmeans/`), để không dùng dữ liệu tương lai.
+- Tính toán: `score_orders` chấm xác suất trễ một lần cho mỗi mô hình. `run_whatif` chạy kịch bản đang chọn cùng lưới chi phí (×0,5; ×1,5; ×2) × hiệu quả (10% đến 100%), kèm độ nhạy ±20%.
+- Kết quả: KPI của kịch bản đang chọn, danh sách đơn nên can thiệp (tải CSV), bảng nhiệt what-if, biểu đồ độ nhạy, so sánh 3 mô hình, 10 tuyến và 10 người bán có nhiều đơn dự kiến trễ nhất.
+- Đối chiếu: với các đơn thuộc tập kiểm tra của mô hình, so sánh tỷ lệ trễ thực tế giữa đơn được chọn và không được chọn. Phần giả định có điểm đánh giá trung bình khi trễ và khi đúng hạn (`REVIEW_QUERY`) làm căn cứ cho thiệt hại.
+
+Chưa có code hoặc model của P3 thì trang chỉ hiện hướng dẫn.
