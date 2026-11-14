@@ -69,3 +69,21 @@ def test_dss_recommendation_changes_with_target():
     assert_clean(at)
     strict = next(m.value for m in at.metric if m.label == "Gợi ý ngày hẹn")
     assert int(strict.split()[0]) > int(loose.split()[0])
+
+
+def test_ml_whatif_page_runs_p3_models():
+    pytest.importorskip("src.dss.whatif", reason="Chưa có code P3")
+    from src.dss import whatif
+    if not hasattr(whatif, "run_whatif"):
+        pytest.skip("Chưa có code P3")
+    from src.common.config import ARTIFACTS_DIR
+    if not list((ARTIFACTS_DIR / "models" / "late_risk").glob("*/manifest.json")):
+        pytest.skip("Chưa train model P3")
+    at = run("7_What_if_ML.py")
+    assert_clean(at)
+    labels = {m.label for m in at.metric}
+    assert {"Số đơn", "Đơn bị cảnh báo trễ"} <= labels
+    at.slider[0].set_value(10).run()
+    assert_clean(at)
+    at.segmented_control(key="whatif_model").set_value("random_forest").run()
+    assert_clean(at)
