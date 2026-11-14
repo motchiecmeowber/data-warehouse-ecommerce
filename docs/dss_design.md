@@ -9,9 +9,9 @@ Hiệu quả là tỷ lệ đơn vốn sẽ trễ mà can thiệp có thể giú
 
 ## Chạy từ thư mục gốc repo
 
-Cấu hình DATABASE_URL, chạy ETL và tạo bộ model mới. Fold 4 dùng cùng seed 42 và config đã chọn. Trong outer train, giữ riêng 20% đơn thật có tỷ lệ lớp tự nhiên để fit sigmoid trên điểm của model nền. Phần fit cung cấp lịch sử seller trước lúc mua cho cả ba tập. LR dùng SMOTE, RF và LightGBM dùng SMOTENC, mỗi model nền train 10.000 On time + 10.000 Late. Đánh giá calibration bằng Brier score trước/sau trên toàn bộ test fold 4. Bảng phân loại dùng ngưỡng 0,4 trên điểm thô. DSS dùng trường p_late đã hiệu chỉnh. Artifact chọn theo phiên bản cũ cần train lại.
+Cấu hình DATABASE_URL, chạy ETL và tạo bộ model mới. Fold 4 dùng cùng seed 42 và config đã chọn. Dùng toàn bộ outer train để xây dựng feature và lấy mẫu 10.000 On time + 10.000 Late. LR dùng SMOTE, RF/LightGBM dùng SMOTENC. Test là toàn bộ fold 4. DSS dùng trực tiếp predict_proba lớp Late cho p_late. Vì train cân bằng nên lợi ích tính từ điểm này là ước tính mô phỏng, có thể lệch so với thực tế.
 
-    python -m src.ml.late_risk --output-dir artifacts/models/late_risk/calibrated
+    python -m src.ml.late_risk --output-dir artifacts/models/late_risk/full_fit
 
 Chạy K-Means với lịch sử đã biết trước ngày quyết định. Ví dụ với đơn năm 2018, dùng snapshot từ năm 2017. Khi mô phỏng lịch sử, người chạy phải xác nhận các kết quả giao và dữ liệu dùng tạo phân nhóm đã có ở thời điểm đó.
 
@@ -23,7 +23,7 @@ Tạo factors.json ánh xạ tên nhóm trong customer_segments.csv sang hệ s�
 
 Khách thiếu trong snapshot nhận nhóm “Chưa phân nhóm” với hệ số 1. Ví dụ thử thiệt hại cơ sở 100 đơn vị tiền, chi phí 2 hoặc 5, hiệu quả 25% hoặc 50%, năng lực 10 đơn hoặc không giới hạn:
 
-    python -m src.dss.whatif --day 2018-05-01 --model-dir artifacts/models/late_risk/calibrated --segments output/kmeans/customer_segments.csv --factors factors.json --loss 100 --cost 2 5 --efficacy 0.25 0.5 --capacity 10 all --output-dir output/dss/demo
+    python -m src.dss.whatif --day 2018-05-01 --model-dir artifacts/models/late_risk/full_fit --segments output/kmeans/customer_segments.csv --factors factors.json --loss 100 --cost 2 5 --efficacy 0.25 0.5 --capacity 10 all --output-dir output/dss/demo
 
 CLI đọc các đơn đủ feature mua trong ngày từ DW, tạo seller history từ artifact và chỉ chấm điểm mỗi model một lần. Trong Python, gọi score_orders(model_dir, orders, segments, factors), sau đó run_whatif(scores, links, loss, costs, efficacies, capacities). Dùng None cho năng lực không giới hạn. Tham số đầu tiên trong mỗi danh sách xác định kịch bản gốc cho tornado.
 

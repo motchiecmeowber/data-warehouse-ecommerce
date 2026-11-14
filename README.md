@@ -160,7 +160,7 @@ Lưu ý trên macOS:
    streamlit run src/app/app.py
    ```
 
-DSS xếp hạng đơn theo lợi ích can thiệp kỳ vọng, dùng xác suất đã hiệu chỉnh,
+DSS xếp hạng đơn theo lợi ích can thiệp kỳ vọng, dùng điểm predict_proba của model,
 nhóm khách K-Means và năng lực xử lý trong ngày. Xem [hướng dẫn train và chạy
 kịch bản](docs/dss_design.md).
 

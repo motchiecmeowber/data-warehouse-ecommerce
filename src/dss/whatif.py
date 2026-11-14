@@ -1,4 +1,4 @@
-"""Rank orders for intervention by calibrated expected net benefit."""
+"""Rank orders for intervention by model-estimated net benefit."""
 
 import argparse
 import json
