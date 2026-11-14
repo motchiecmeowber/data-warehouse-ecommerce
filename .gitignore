@@ -29,3 +29,7 @@ artifacts/models/*
 .vscode/
 .idea/
 .DS_Store
+
+# Streamlit skills (tạo bởi `streamlit skills`)
+.agents/
+.claude/

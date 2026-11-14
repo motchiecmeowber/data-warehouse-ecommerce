@@ -1,0 +1,7 @@
+# Chạy: ty check src tests
+# ty chưa hiểu các phương thức mark_* / encode do Altair sinh ra, chỉ bỏ qua cho file vẽ biểu đồ.
+[[overrides]]
+include = ["src/app/components/charts.py"]
+
+[overrides.rules]
+missing-attribute = "ignore"
