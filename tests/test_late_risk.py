@@ -13,6 +13,7 @@ from src.ml.late_risk import (
     HISTORY,
     MODEL_NAMES,
     NUMERIC,
+    load_orders,
     predict_late,
     prepare_orders,
     resample_train,
@@ -162,3 +163,23 @@ def test_raw_scoring_and_segments(tmp_path):
     assert scored.factor.tolist() == [2, 2, 1, 1] * 3
     with pytest.raises(ValueError):
         score_orders(tmp_path, data, pd.concat([segments, segments]), {"A": 2})
+
+
+def test_warehouse_half_centiday_rounding(monkeypatch):
+    rows = orders(3)
+    rows["order_estimated_delivery_date"] = (
+        rows.order_purchase_timestamp + pd.Timedelta(seconds=1659312)
+    )
+    rows.loc[2, "order_estimated_delivery_date"] = (
+        rows.order_purchase_timestamp[2] - pd.Timedelta(seconds=1)
+    )
+    rows["shipping_days_estimated"] = 19.21
+    rows["order_delivered_customer_date"] = rows.order_estimated_delivery_date
+    rows["is_late"] = [0, 1, 0]
+    replies = iter([rows, rows[["order_id"]].assign(seller_id="s")])
+    monkeypatch.setattr(pd, "read_sql_query", lambda *a, **kw: next(replies))
+    loaded, _ = load_orders(None)
+    assert prepare_orders(loaded).shipping_days_estimated.tolist() == [
+        19.2,
+        19.2,
+    ]

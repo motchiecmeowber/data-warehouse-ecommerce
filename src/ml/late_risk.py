@@ -137,7 +137,6 @@ WITH items AS (
 )
 SELECT f.order_id, customer.customer_unique_id, f.order_purchase_timestamp,
        t.order_delivered_customer_date, t.order_estimated_delivery_date,
-       f.promised_days AS shipping_days_estimated,
        f.is_late, f.delay_days,
        totals.freight_value, totals.item_physical_score, totals.distance_km,
        categories.product_category_name
@@ -164,6 +163,14 @@ ORDER BY f.order_id, s.seller_id
 """
 
 
+def shipping_days(data):
+    duration = (
+        data.order_estimated_delivery_date - data.order_purchase_timestamp
+    )
+    seconds = duration.dt.total_seconds()
+    return (seconds.where(seconds >= 0) / 86400).round(2)
+
+
 def load_orders(connection, decision_day=None):
     """Read ETL-cleaned warehouse features and exact milestone timestamps."""
     query = QUERY
@@ -185,6 +192,7 @@ def load_orders(connection, decision_day=None):
     ]:
         data[col] = pd.to_datetime(data[col])
     purchase = data.order_purchase_timestamp
+    data["shipping_days_estimated"] = shipping_days(data)
     data["order_weekday"] = purchase.dt.dayofweek
     data["order_purchase_month"] = purchase.dt.month
     static = [col for col in FEATURES if col not in HISTORY]
@@ -344,10 +352,7 @@ def prepare_orders(orders):
         raise ValueError("Category must be nonempty")
     data["product_category_name"] = category
     purchase = data.order_purchase_timestamp
-    expected_days = (
-        (data.order_estimated_delivery_date - purchase).dt.total_seconds()
-        / 86400
-    ).round(2)
+    expected_days = shipping_days(data)
     if not (
         np.allclose(data.shipping_days_estimated, expected_days, atol=1e-8)
         and data.order_weekday.eq(purchase.dt.dayofweek).all()
