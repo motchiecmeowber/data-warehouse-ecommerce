@@ -14,13 +14,14 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 st.set_page_config(page_title="E-commerce DW & DSS", layout="wide")
+st.logo(str(ROOT_DIR / "src" / "app" / "assets" / "logo.svg"), size="large")
 
 pages = [
-    st.Page("pages/1_Tong_quan.py", title="Tổng quan"),
-    st.Page("pages/2_Logistics.py", title="Logistics"),
-    st.Page("pages/3_Nguoi_ban.py", title="Người bán"),
-    st.Page("pages/4_OLAP_explorer.py", title="OLAP explorer"),
-    st.Page("pages/5_Mo_hinh_ML.py", title="Mô hình ML"),
-    st.Page("pages/6_DSS_ngay_hen_giao.py", title="DSS ngày hẹn giao"),
+    st.Page("pages/1_Tong_quan.py", title="Tổng quan", icon=":material/dashboard:"),
+    st.Page("pages/2_Logistics.py", title="Logistics", icon=":material/local_shipping:"),
+    st.Page("pages/3_Nguoi_ban.py", title="Người bán", icon=":material/storefront:"),
+    st.Page("pages/4_OLAP_explorer.py", title="OLAP explorer", icon=":material/view_in_ar:"),
+    st.Page("pages/5_Mo_hinh_ML.py", title="Mô hình ML", icon=":material/model_training:"),
+    st.Page("pages/6_DSS_ngay_hen_giao.py", title="DSS ngày hẹn giao", icon=":material/lightbulb:"),
 ]
 st.navigation(pages).run()
