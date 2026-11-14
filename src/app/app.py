@@ -23,5 +23,6 @@ pages = [
     st.Page("pages/4_OLAP_explorer.py", title="OLAP explorer", icon=":material/view_in_ar:"),
     st.Page("pages/5_Mo_hinh_ML.py", title="Phân cụm khách hàng", icon=":material/groups:"),
     st.Page("pages/6_DSS_ngay_hen_giao.py", title="DSS ngày hẹn giao", icon=":material/lightbulb:"),
+    st.Page("pages/7_What_if_ML.py", title="What-if rủi ro trễ (ML)", icon=":material/model_training:"),
 ]
 st.navigation(pages).run()

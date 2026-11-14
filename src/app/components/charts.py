@@ -46,7 +46,7 @@ def pareto(df: pd.DataFrame, x: str, y: str, title: str, xlabel: str, ylabel: st
 
 
 def lines(df: pd.DataFrame, x: str, y: str, series: str, title: str, ylabel: str,
-          colors: dict[str, str] | None = None, height: int = 320) -> alt.Chart:
+          colors: dict[str, str] | None = None, xlabel: str = "Tháng", height: int = 320) -> alt.Chart:
     """Nhiều đường (df ở dạng dài: cột x, y, series)."""
     color = alt.Color(f"{series}:N", title=None, legend=alt.Legend(orient="bottom"),
                       scale=alt.Scale(domain=list(colors), range=list(colors.values())) if colors else alt.Undefined)
@@ -54,7 +54,7 @@ def lines(df: pd.DataFrame, x: str, y: str, series: str, title: str, ylabel: str
         x=alt.X(f"{x}:O", title=None, axis=alt.Axis(labelAngle=-45)),
         y=alt.Y(f"{y}:Q", title=ylabel),
         color=color,
-        tooltip=[alt.Tooltip(f"{x}:O", title="Tháng"), alt.Tooltip(f"{series}:N", title="Loại"),
+        tooltip=[alt.Tooltip(f"{x}:O", title=xlabel), alt.Tooltip(f"{series}:N", title="Loại"),
                  alt.Tooltip(f"{y}:Q", title=ylabel, format=",.1f")],
     ).properties(title=title, height=height)
 

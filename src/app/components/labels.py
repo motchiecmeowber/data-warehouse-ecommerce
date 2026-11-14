@@ -44,10 +44,11 @@ REGION = {
     "Norte": "Bắc (Norte)", "Nordeste": "Đông Bắc (Nordeste)", "Centro-Oeste": "Trung Tây (Centro-Oeste)",
     "Sudeste": "Đông Nam (Sudeste)", "Sul": "Nam (Sul)",
 }
+MODEL = {"logistic_regression": "Logistic Regression", "random_forest": "Random Forest", "lightgbm": "LightGBM"}
 # cột trong view -> bảng nhãn
 BY_COLUMN = {
     "category": CATEGORY, "order_status": STATUS, "payment_type": PAYMENT,
-    "customer_region": REGION, "seller_region": REGION,
+    "customer_region": REGION, "seller_region": REGION, "model": MODEL,
 }
 
 
