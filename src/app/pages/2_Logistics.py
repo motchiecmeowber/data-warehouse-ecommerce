@@ -7,10 +7,12 @@ import streamlit as st
 from src.app.components import charts
 from src.app.components.data import query, require_olap
 from src.app.components.filters import fmt_pct, sidebar_filters
+from src.app.components.kpi import inject_css, kpi
 
 st.title("Logistics: thời gian giao và giao trễ")
 st.caption("Thời gian giao và tỷ lệ giao trễ theo tháng, bang khách, tuyến người bán → khách và từng chặng vận chuyển.")
 require_olap()
+inject_css()
 flt = sidebar_filters()
 where, p = flt.where()
 # Chỉ tính đơn đã giao (có ngày khách nhận)
@@ -27,15 +29,15 @@ def days(v) -> str:
     return f"{v:.1f} ngày" if v is not None and v == v else "–"
 
 
-with st.container(horizontal=True):
-    st.metric("Đơn đã giao", f"{int(k.delivered or 0):,}", border=True)
-    st.metric("Tỷ lệ giao trễ", fmt_pct(k.late / k.delivered if k.delivered else None), border=True)
-    st.metric("Thời gian giao TB", days(k.avg_days), border=True)
-    st.metric("Ngày hẹn TB", days(k.avg_promised), border=True)
+with st.grid(4, gap="small"):
+    kpi("Đơn đã giao", f"{int(k.delivered or 0):,}")
+    kpi("Tỷ lệ giao trễ", fmt_pct(k.late / k.delivered if k.delivered else None), "red")
+    kpi("Thời gian giao trung bình", days(k.avg_days))
+    kpi("Ngày hẹn trung bình", days(k.avg_promised))
 
 # on_change="rerun": chỉ tab đang mở mới chạy truy vấn
 tab_trend, tab_geo, tab_route, tab_stage = st.tabs(
-    ["Xu hướng", "Theo bang", "Theo tuyến", "Các chặng và review"], key="logistics_tabs", on_change="rerun")
+    ["Xu hướng", "Theo bang", "Theo tuyến", "Các chặng và đánh giá"], key="logistics_tabs", on_change="rerun")
 
 if tab_trend.open:
     with tab_trend:
@@ -77,7 +79,7 @@ if tab_geo.open:
 
 if tab_route.open:
     with tab_route:
-        min_orders = st.slider("Tuyến có tối thiểu ... đơn đã giao", 10, 300, 50, step=10)
+        min_orders = st.slider("Số đơn đã giao tối thiểu của mỗi tuyến", 10, 300, 50, step=10)
         r = query(f"""
             SELECT seller_state, customer_state, sum(delivered_orders) AS delivered,
                    sum(late_orders)::float / nullif(sum(delivered_orders), 0) AS late_rate,
@@ -97,10 +99,10 @@ if tab_route.open:
             r["route"] = r["seller_state"] + " → " + r["customer_state"]
             st.dataframe(r.sort_values("late_rate", ascending=False)[["route", "delivered", "late_rate", "avg_days"]]
                          .rename(columns={"route": "Tuyến", "delivered": "Đơn đã giao", "late_rate": "Tỷ lệ trễ",
-                                          "avg_days": "Ngày giao TB"}),
+                                          "avg_days": "Số ngày giao trung bình"}),
                          hide_index=True, alt="Bảng tuyến giao hàng xếp theo tỷ lệ trễ",
                          column_config={"Tỷ lệ trễ": st.column_config.ProgressColumn(format="percent", min_value=0, max_value=1),
-                                        "Ngày giao TB": st.column_config.NumberColumn(format="%.1f")})
+                                        "Số ngày giao trung bình": st.column_config.NumberColumn(format="%.1f")})
             st.caption("Tuyến = bang người bán của dòng hàng có doanh thu lớn nhất trong đơn (1,3% đơn có nhiều người bán).")
 
 if tab_stage.open:
@@ -112,9 +114,9 @@ if tab_stage.open:
                    avg(transit_days) AS "Vận chuyển"
             FROM olap.v_fulfillment {w_o + (' AND ' if w_o else 'WHERE ')} is_delivered""", p_o).iloc[0]
         a, b = st.columns(2)
-        sd = stage.rename_axis("Chặng").reset_index(name="Ngày TB")
+        sd = stage.rename_axis("Chặng").reset_index(name="Số ngày trung bình")
         with a, st.container(border=True):
-            charts.show(charts.bar(sd, "Chặng", "Ngày TB", "Thời gian TB từng chặng (ngày)"),
+            charts.show(charts.bar(sd, "Chặng", "Số ngày trung bình", "Thời gian trung bình của từng chặng (ngày)"),
                         "Thời gian trung bình của từng chặng giao hàng")
         rv = query(f"""
             SELECT CASE WHEN o.is_late THEN 'Giao trễ' ELSE 'Đúng hạn / sớm' END AS delivery, r.review_score, count(*) AS n
@@ -124,8 +126,8 @@ if tab_stage.open:
         if not rv.empty:
             rv["share"] = rv["n"] / rv.groupby("delivery")["n"].transform("sum")
             with b, st.container(border=True):
-                charts.show(charts.grouped_bar(rv, "review_score", "share", "delivery", "Phân bố điểm review: giao trễ vs đúng hạn",
-                                               "Điểm review", "Tỷ trọng", {"Giao trễ": charts.RED, "Đúng hạn / sớm": charts.GREEN},
-                                               pct=True), "Phân bố điểm review khi giao trễ và khi đúng hạn")
+                charts.show(charts.grouped_bar(rv, "review_score", "share", "delivery", "Phân bố điểm đánh giá: giao trễ so với đúng hạn",
+                                               "Điểm đánh giá", "Tỷ trọng đơn", {"Giao trễ": charts.RED, "Đúng hạn / sớm": charts.GREEN},
+                                               pct=True), "Phân bố điểm đánh giá khi giao trễ và khi đúng hạn")
                 avg = rv.assign(w=rv["review_score"] * rv["n"]).groupby("delivery")[["w", "n"]].sum()
                 st.caption("Điểm TB: " + " · ".join(f"{i}: {r.w / r.n:.2f}" for i, r in avg.iterrows()))

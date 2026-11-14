@@ -7,10 +7,13 @@ import streamlit as st
 from src.app.components import charts
 from src.app.components.data import query, require_olap
 from src.app.components.filters import fmt_money, fmt_pct, sidebar_filters
+from src.app.components.kpi import inject_css, kpi
+from src.app.components.labels import localize
 
 st.title("Tổng quan bán hàng")
-st.caption("Doanh thu, số đơn, giá trị đơn, tỷ lệ giao trễ và điểm review; xu hướng theo tháng, danh mục, bang và thanh toán.")
+st.caption("Doanh thu, số đơn, giá trị đơn, tỷ lệ giao trễ và điểm đánh giá; xu hướng theo tháng, danh mục, bang và thanh toán.")
 require_olap()
+inject_css()
 flt = sidebar_filters(with_category=True)
 
 # KPI cấp đơn (mv_delivery_cube không có chiều danh mục)
@@ -26,14 +29,14 @@ review = query(f"""
     SELECT avg(r.review_score) AS score
     FROM olap.v_review r JOIN olap.v_fulfillment o USING (order_id) {where_r}""", p_r).iloc[0, 0]
 
-with st.container(horizontal=True):
-    st.metric("Doanh thu", fmt_money(k.revenue), border=True)
-    st.metric("Số đơn", f"{int(k.orders or 0):,}", border=True)
-    st.metric("Giá trị đơn TB", fmt_money(k.revenue / k.orders if k.orders else None), border=True)
-    st.metric("Phí vận chuyển / doanh thu", fmt_pct(k.freight / k.revenue if k.revenue else None), border=True)
-    st.metric("Tỷ lệ giao trễ", fmt_pct(k.late / k.delivered if k.delivered else None), border=True,
-              help="Trên các đơn đã giao: ngày khách nhận > ngày hẹn giao")
-    st.metric("Điểm review TB", f"{review:.2f} / 5" if review is not None and review == review else "–", border=True)
+with st.grid(3, gap="small"):
+    kpi("Doanh thu", fmt_money(k.revenue))
+    kpi("Số đơn", f"{int(k.orders or 0):,}")
+    kpi("Giá trị đơn trung bình", fmt_money(k.revenue / k.orders if k.orders else None))
+    kpi("Phí vận chuyển / doanh thu", fmt_pct(k.freight / k.revenue if k.revenue else None))
+    kpi("Tỷ lệ giao trễ", fmt_pct(k.late / k.delivered if k.delivered else None), "red",
+        help="Trên các đơn đã giao: ngày khách nhận > ngày hẹn giao")
+    kpi("Điểm đánh giá trung bình", f"{review:.2f} / 5" if review is not None and review == review else "–")
 if flt.categories:
     st.caption("Các chỉ số trên là cấp đơn hàng nên không lọc theo danh mục; biểu đồ doanh thu bên dưới có lọc.")
 
@@ -63,6 +66,7 @@ with left, st.container(border=True):
     cat = query(f"""
         SELECT category, sum(revenue) AS revenue FROM olap.mv_sales_cube {where_s}
         GROUP BY category ORDER BY revenue DESC LIMIT :n""", {**p_s, "n": top_n})
+    cat = localize(cat, "category")
     charts.show(charts.bar(cat, "category", "revenue", f"Top {top_n} danh mục theo doanh thu", ylabel="Doanh thu (R$)",
                            horizontal=True), f"Top {top_n} danh mục theo doanh thu")
 with right, st.container(border=True):
@@ -79,11 +83,12 @@ pay = query(f"""
            avg(p.payment_installments) AS avg_installments
     FROM olap.v_payment p JOIN olap.v_fulfillment o USING (order_id) {where_p}
     GROUP BY p.payment_type ORDER BY value DESC""", p_p)
+pay = localize(pay, "payment_type")
 with st.container(border=True):
     st.subheader("Cơ cấu thanh toán")
     a, b = st.columns(2)
     with a:
-        charts.show(charts.bar(pay, "payment_type", "value", "Giá trị thanh toán theo loại", ylabel="R$"),
-                    "Giá trị thanh toán theo loại thanh toán")
-    b.dataframe(pay.rename(columns={"payment_type": "Loại", "value": "Giá trị", "payments": "Số lần",
-                                    "avg_installments": "Số kỳ TB"}), hide_index=True, alt="Cơ cấu thanh toán theo loại")
+        charts.show(charts.bar(pay, "payment_type", "value", "Giá trị thanh toán theo hình thức", ylabel="R$"),
+                    "Giá trị thanh toán theo hình thức thanh toán")
+    b.dataframe(pay.rename(columns={"payment_type": "Hình thức thanh toán", "value": "Tổng giá trị (R$)",
+                                    "payments": "Số lần thanh toán", "avg_installments": "Số kỳ trả góp trung bình"}), hide_index=True, alt="Cơ cấu thanh toán theo loại")

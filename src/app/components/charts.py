@@ -32,7 +32,7 @@ def line(df: pd.DataFrame, x: str, y: str, title: str, ylabel: str, pct: bool = 
     return alt.Chart(df).mark_line(point=True, color=color or alt.Undefined).encode(
         x=alt.X(f"{x}:O", title=None, axis=alt.Axis(labelAngle=-45)),
         y=alt.Y(f"{y}:Q", title=ylabel, axis=alt.Axis(format=_axis_format(pct))),
-        tooltip=[alt.Tooltip(f"{x}:O", title="Kỳ"), alt.Tooltip(f"{y}:Q", title=ylabel, format=".1%" if pct else ",.1f")],
+        tooltip=[alt.Tooltip(f"{x}:O", title="Tháng"), alt.Tooltip(f"{y}:Q", title=ylabel, format=".1%" if pct else ",.1f")],
     ).properties(title=title, height=height)
 
 
@@ -54,7 +54,7 @@ def lines(df: pd.DataFrame, x: str, y: str, series: str, title: str, ylabel: str
         x=alt.X(f"{x}:O", title=None, axis=alt.Axis(labelAngle=-45)),
         y=alt.Y(f"{y}:Q", title=ylabel),
         color=color,
-        tooltip=[alt.Tooltip(f"{x}:O", title="Kỳ"), alt.Tooltip(f"{series}:N", title="Loại"),
+        tooltip=[alt.Tooltip(f"{x}:O", title="Tháng"), alt.Tooltip(f"{series}:N", title="Loại"),
                  alt.Tooltip(f"{y}:Q", title=ylabel, format=",.1f")],
     ).properties(title=title, height=height)
 
@@ -93,15 +93,15 @@ def heatmap(df: pd.DataFrame, x: str, y: str, z: str, title: str, pct: bool = Fa
     fmt = ".0%" if pct else ".1f"
     cells = base.mark_rect().encode(
         color=alt.Color(f"{z}:Q", title=None, scale=alt.Scale(scheme="oranges"), legend=alt.Legend(format=fmt, orient="bottom")),
-        tooltip=[alt.Tooltip(f"{y}:N", title="Người bán"), alt.Tooltip(f"{x}:N", title="Khách"),
-                 alt.Tooltip(f"{z}:Q", title="Giá trị", format=".1%" if pct else ".1f")])
+        tooltip=[alt.Tooltip(f"{y}:N", title="Bang người bán"), alt.Tooltip(f"{x}:N", title="Bang khách"),
+                 alt.Tooltip(f"{z}:Q", title="Tỷ lệ trễ", format=".1%" if pct else ".1f")])
     labels = base.mark_text(fontSize=11).encode(
         text=alt.Text(f"{z}:Q", format=fmt),
         color=alt.condition(alt.datum[z] > df[z].quantile(0.7), alt.value("white"), alt.value("black")))
     return (cells + labels).properties(title=title, height=height)
 
 
-def scatter(df: pd.DataFrame, x: str, y: str, size: str, color: str, tooltip: list[str], title: str,
+def scatter(df: pd.DataFrame, x: str, y: str, size: str, color: str, tooltip: list[alt.Tooltip], title: str,
             xlabel: str, ylabel: str, size_label: str, color_label: str, height: int = 380) -> alt.Chart:
     return alt.Chart(df).mark_circle(opacity=0.6).encode(
         x=alt.X(f"{x}:Q", title=xlabel, axis=alt.Axis(format=".0%")),
@@ -113,16 +113,16 @@ def scatter(df: pd.DataFrame, x: str, y: str, size: str, color: str, tooltip: li
 
 
 def tradeoff(curve: pd.DataFrame, target: float, promise_days: int, height: int = 380) -> alt.LayerChart:
-    """DSS: tỷ lệ trễ (trục trái, đỏ) và điểm review kỳ vọng (trục phải, xanh) theo số ngày hẹn."""
+    """DSS: tỷ lệ trễ (trục trái, đỏ) và điểm đánh giá kỳ vọng (trục phải, xanh) theo số ngày hẹn."""
     base = alt.Chart(curve).encode(x=alt.X("promise_days:Q", title="Số ngày hẹn"))
     late = base.mark_line(color=RED).encode(
         y=alt.Y("late_rate:Q", title="Tỷ lệ trễ", axis=alt.Axis(format=".0%", titleColor=RED)),
         tooltip=[alt.Tooltip("promise_days:Q", title="Ngày hẹn"), alt.Tooltip("late_rate:Q", title="Tỷ lệ trễ", format=".1%")])
     review = base.mark_line(color=PRIMARY).encode(
-        y=alt.Y("expected_review:Q", title="Điểm review kỳ vọng", scale=alt.Scale(zero=False),
+        y=alt.Y("expected_review:Q", title="Điểm đánh giá kỳ vọng", scale=alt.Scale(zero=False),
                 axis=alt.Axis(titleColor=PRIMARY)),
-        tooltip=[alt.Tooltip("promise_days:Q", title="Ngày hẹn"), alt.Tooltip("expected_review:Q", title="Review", format=".2f")])
+        tooltip=[alt.Tooltip("promise_days:Q", title="Ngày hẹn"), alt.Tooltip("expected_review:Q", title="Điểm đánh giá", format=".2f")])
     goal = alt.Chart(pd.DataFrame({"y": [target]})).mark_rule(strokeDash=[4, 4], color=GRAY).encode(y=alt.Y("y:Q", axis=None))
     pick = alt.Chart(pd.DataFrame({"x": [promise_days]})).mark_rule(strokeDash=[6, 3], color="#EA580C").encode(x="x:Q")
     return alt.layer(alt.layer(late, goal), review, pick).resolve_scale(y="independent").properties(
-        title="Đánh đổi giữa ngày hẹn, tỷ lệ trễ và điểm review", height=height)
+        title="Đánh đổi giữa ngày hẹn, tỷ lệ trễ và điểm đánh giá", height=height)

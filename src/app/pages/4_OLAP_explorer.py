@@ -2,10 +2,12 @@
 
 Phụ trách: P2
 """
+import pandas as pd
 import streamlit as st
 
 from src.app.components.data import engine, require_olap
 from src.app.components.filters import sidebar_filters
+from src.app.components.labels import vi
 from src.olap import console
 from src.olap.cube import DIMENSIONS, HIERARCHIES, MEASURES, aggregate
 
@@ -56,8 +58,10 @@ if tab_cube.open:
                 df.columns = [str(c) for c in df.columns]
             st.write(f"**{len(df):,} dòng**")
             shown = df.copy()
-            for d in rows:      # chiều hiển thị dạng chữ (canh trái); ô trống ở dòng tổng ghi là "Tổng"
-                shown[d] = shown[d].astype("string").fillna("Tổng")
+            for d in rows:      # chiều hiển thị dạng chữ, nhãn tiếng Việt; ô trống ở dòng tổng ghi là "Tổng"
+                shown[d] = shown[d].map(lambda v, c=d: f"Quý {v}" if c == "quarter" and pd.notna(v) else vi(c, v))
+            if cols:
+                shown = shown.rename(columns={str(k): vi(cols[0], k) for k in shown.columns if k not in rows and k != "value"})
             shown = shown.rename(columns={**DIMENSIONS, "value": MEASURES[measure][1]})
             numeric = {c: st.column_config.NumberColumn(format="localized") for c in shown.columns
                        if c not in [DIMENSIONS[r] for r in rows]}
@@ -71,8 +75,8 @@ if tab_cube.open:
                              alt=f"{MEASURES[measure][1]} theo {DIMENSIONS[rows[0]]}")
             with st.expander("Câu SQL đã sinh"):
                 st.code(sql, language="sql")
-            st.caption("Số đơn không có trong khối này vì đếm đơn không cộng dồn được khi gộp theo danh mục; "
-                       "xem truy vấn `COUNT(DISTINCT order_id)` ở tab SQL.")
+            st.caption("Khối này không có số đơn vì một đơn có thể thuộc nhiều danh mục. "
+                       "Muốn đếm đơn, dùng `COUNT(DISTINCT order_id)` ở tab Truy vấn SQL.")
 
 if tab_sql.open:
     with tab_sql:

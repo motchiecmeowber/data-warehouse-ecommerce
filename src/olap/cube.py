@@ -25,8 +25,8 @@ HIERARCHIES: dict[str, list[str]] = {
     "Địa lý khách hàng": ["customer_region", "customer_state"],
 }
 MEASURES: dict[str, tuple[str, str]] = {
-    "revenue": ("sum(revenue)", "Doanh thu"),
-    "freight": ("sum(freight)", "Phí vận chuyển"),
+    "revenue": ("sum(revenue)", "Doanh thu (R$)"),
+    "freight": ("sum(freight)", "Phí vận chuyển (R$)"),
     "units": ("sum(units)", "Số sản phẩm bán"),
     "line_items": ("sum(line_items)", "Số dòng hàng"),
 }
