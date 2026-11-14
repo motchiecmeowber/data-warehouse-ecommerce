@@ -12,7 +12,6 @@ data/raw/*
 # Mọi file CSV/zip đều không commit, trừ dữ liệu mẫu và số liệu cho báo cáo
 *.csv
 *.zip
-!data/sample/*.csv
 !data/reference/*.csv
 !reports/metrics/*.csv
 

@@ -39,7 +39,6 @@ data-warehouse-ecommerce/
 ├── data/
 │   ├── README.md                    # Nguồn, cách tải, mô tả các file
 │   ├── raw/                         # 9 file CSV gốc từ Kaggle (không commit)
-│   ├── sample/                      # Bộ mẫu ~1.500 đơn, giữ đúng quan hệ khóa (có commit)
 │   └── reference/                   # Dữ liệu tham chiếu nhóm bổ sung: 27 bang, ngày lễ Brazil (có commit)
 │
 ├── src/
@@ -64,7 +63,6 @@ data-warehouse-ecommerce/
 │   │   ├── load_dimensions.py
 │   │   ├── load_facts.py
 │   │   ├── quality_checks.py
-│   │   ├── make_sample.py           # Tạo data/sample từ data/raw
 │   │   └── run_etl.py
 │   │
 │   ├── olap/
