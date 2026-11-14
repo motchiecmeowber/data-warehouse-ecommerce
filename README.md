@@ -32,6 +32,8 @@ data-warehouse-ecommerce/
 ├── requirements.txt
 ├── Makefile                         # Lệnh tắt: db, init, etl, train, score, app, test
 │
+├── .streamlit/config.toml           # Theme dashboard (màu, font, bảng màu biểu đồ)
+│
 ├── configs/
 │   ├── etl.yaml                     # Tên file nguồn và file tham chiếu, khung tọa độ Brazil
 │   └── ml.yaml                      # Mốc chia train/test theo thời gian, danh sách mô hình
@@ -135,7 +137,7 @@ Lưu ý trên macOS:
 - Cần cài [Homebrew](https://brew.sh) trước để chạy `brew install libomp`.
 - Dùng `python3` khi chưa kích hoạt venv. Sau khi chạy `source .venv/bin/activate` thì `python` sẽ trỏ vào Python của venv, nên các lệnh bên dưới dùng như nhau trên cả hai hệ điều hành.
 - Docker Desktop có bản cho cả chip Apple Silicon (M1/M2/M3…) và Intel; image `postgres:16` chạy được trên cả hai.
-- Có thể dùng `make db`, `make etl`, `make app`… (xem [Makefile](Makefile)) vì macOS có sẵn `make` sau khi cài Xcode Command Line Tools (`xcode-select --install`).
+- Có thể dùng `make db`, `make etl`, `make olap`, `make app`… (xem [Makefile](Makefile)) vì macOS có sẵn `make` sau khi cài Xcode Command Line Tools (`xcode-select --install`).
 
 ### Các bước chạy (chung cho Windows và macOS)
 
@@ -152,12 +154,16 @@ Lưu ý trên macOS:
    ```bash
    python -m src.etl.run_etl
    ```
-5. Train và chấm điểm mô hình:
+5. Tạo view OLAP (chạy lại `--refresh` sau mỗi lần ETL):
+   ```bash
+   python -m src.olap.build
+   ```
+6. Train và chấm điểm mô hình:
    ```bash
    python -m src.ml.train
    python -m src.ml.predict
    ```
-6. Mở dashboard:
+7. Mở dashboard (các trang Tổng quan, Logistics, Người bán, OLAP explorer, DSS chỉ cần xong bước 5):
    ```bash
    streamlit run src/app/app.py
    ```

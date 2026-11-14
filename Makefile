@@ -1,5 +1,5 @@
 # Lệnh tắt (cần GNU make). Trên Windows có thể chạy trực tiếp các lệnh python tương ứng.
-.PHONY: db init etl train score app test
+.PHONY: db init etl olap train score app test
 
 db:
 	docker compose up -d
@@ -9,6 +9,9 @@ init:
 
 etl:
 	python -m src.etl.run_etl
+
+olap:
+	python -m src.olap.build
 
 train:
 	python -m src.ml.train
