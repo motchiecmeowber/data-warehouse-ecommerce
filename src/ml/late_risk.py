@@ -13,7 +13,7 @@ from lightgbm import LGBMClassifier
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report, precision_recall_curve
+from sklearn.metrics import brier_score_loss, classification_report
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.pipeline import make_pipeline
@@ -135,13 +135,14 @@ WITH items AS (
                 THEN max(distance_km) END AS distance_km
     FROM items GROUP BY order_id
 )
-SELECT f.order_id, f.order_purchase_timestamp,
+SELECT f.order_id, customer.customer_unique_id, f.order_purchase_timestamp,
        t.order_delivered_customer_date, t.order_estimated_delivery_date,
        f.promised_days AS shipping_days_estimated,
        f.is_late, f.delay_days,
        totals.freight_value, totals.item_physical_score, totals.distance_km,
        categories.product_category_name
 FROM dw.fact_order_fulfillment f
+JOIN dw.dim_customer customer ON customer.customer_key = f.customer_key
 JOIN staging.orders_typed t ON t.order_id = f.order_id
 JOIN totals ON totals.order_id = f.order_id
 LEFT JOIN categories
@@ -151,17 +152,31 @@ ORDER BY f.order_id
 """
 
 LINKS_QUERY = """
-SELECT DISTINCT f.order_id, s.seller_id
+SELECT DISTINCT f.order_id, s.seller_id,
+       sg.state_code AS seller_state, cg.state_code AS customer_state
 FROM dw.fact_sales f
 JOIN dw.dim_seller s ON s.seller_key = f.seller_key
+JOIN dw.dim_customer c ON c.customer_key = f.customer_key
+JOIN dw.dim_geography cg ON cg.geography_key = c.geography_key
+JOIN dw.dim_geography sg ON sg.geography_key = s.geography_key
 WHERE s.seller_id IS NOT NULL
 ORDER BY f.order_id, s.seller_id
 """
 
 
-def load_orders(connection):
+def load_orders(connection, decision_day=None):
     """Read ETL-cleaned warehouse features and exact milestone timestamps."""
-    data = pd.read_sql_query(text(QUERY), connection)
+    query = QUERY
+    params = {}
+    if decision_day is not None:
+        start = pd.Timestamp(decision_day).normalize()
+        params = {"start": start, "end": start + pd.Timedelta(days=1)}
+        query = query.replace(
+            "WHERE f.is_late IS NOT NULL",
+            "WHERE f.order_purchase_timestamp >= :start "
+            "AND f.order_purchase_timestamp < :end",
+        )
+    data = pd.read_sql_query(text(query), connection, params=params)
     links = pd.read_sql_query(text(LINKS_QUERY), connection)
     for col in [
         "order_purchase_timestamp",
@@ -176,22 +191,21 @@ def load_orders(connection):
     data = data.dropna(subset=static).reset_index(drop=True)
     if data.empty or not data.order_id.is_unique:
         raise ValueError("DW must contain eligible orders with unique IDs")
-    data["is_late"] = data.is_late.astype(int)
-    if set(data.is_late.unique()) != {0, 1}:
-        raise ValueError("DW must contain both on-time and late orders")
+    if decision_day is None:
+        data["is_late"] = data.is_late.astype(int)
+        if set(data.is_late.unique()) != {0, 1}:
+            raise ValueError("DW must contain both on-time and late orders")
+    else:
+        data = data.drop(
+            columns=[
+                "is_late",
+                "delay_days",
+                "order_delivered_customer_date",
+            ]
+        )
     if not data.order_id.isin(links.order_id).all():
         raise ValueError("Missing seller links for eligible orders")
-    return data, links
-
-
-def balanced_indices(indices, y, seed):
-    """Keep every real late order and sample equally many on-time orders."""
-    late = indices[y[indices] == 1]
-    ontime = indices[y[indices] == 0]
-    if not 0 < len(late) <= len(ontime):
-        raise ValueError("Cannot form a real 50:50 evaluation set")
-    rng = np.random.default_rng(seed)
-    return np.sort(np.r_[late, rng.choice(ontime, len(late), replace=False)])
+    return data, links.loc[links.order_id.isin(data.order_id)].copy()
 
 
 def resample_train(features, y, method):
@@ -288,44 +302,6 @@ def make_models(fold):
     }
 
 
-def select_threshold(y, probability):
-    """Maximize recall subject to precision >= 0.60; never relax it."""
-    precision, recall, thresholds = precision_recall_curve(y, probability)
-    valid = np.flatnonzero(precision[:-1] >= 0.60)
-    if not len(valid):
-        return None
-    f1 = (
-        2
-        * precision[:-1]
-        * recall[:-1]
-        / np.maximum(
-            precision[:-1] + recall[:-1],
-            np.finfo(float).eps,
-        )
-    )
-    best = max(valid, key=lambda i: (recall[i], f1[i], thresholds[i]))
-    return {
-        "threshold": float(thresholds[best]),
-        "precision": float(precision[best]),
-        "recall": float(recall[best]),
-        "f1": float(f1[best]),
-    }
-
-
-def choose_method(candidates):
-    valid = [item for item in candidates if item is not None]
-    if not valid:
-        return None
-    return max(
-        valid,
-        key=lambda item: (
-            item["recall"],
-            item["precision"],
-            item["method"] == "SMOTE",
-        ),
-    )
-
-
 def prepare_orders(orders):
     """Validate one feature row per order, without requiring its outcome."""
     required = [
@@ -387,9 +363,13 @@ def predict_late(bundle, orders):
     data = prepare_orders(orders)
     x = bundle["encoder"].transform(data[FEATURES]).astype(np.float32)
     probability = bundle["model"].predict_proba(x)[:, 1]
+    if "calibrator" not in bundle:
+        raise ValueError("Artifact lacks calibration; retrain late_risk")
+    calibrated = bundle["calibrator"].predict_proba(probability[:, None])[:, 1]
     return pd.DataFrame(
         {
             "order_id": data.order_id.to_numpy(),
+            "p_late": calibrated,
             "risk_score": probability,
             "threshold": bundle["threshold"],
             "predicted_label": (probability >= bundle["threshold"]).astype(
@@ -400,7 +380,7 @@ def predict_late(bundle, orders):
 
 
 def train(output_dir):
-    """Select on validation, then refit and evaluate one common outer fold."""
+    """Fit the selected fold 4 models and calibrate on held-out real orders."""
     output = Path(output_dir)
     if output.exists() and any(output.iterdir()):
         raise FileExistsError(
@@ -422,92 +402,35 @@ def train(output_dir):
             random_state=SEED,
         ).split(data, y)
     )
-    choices = []
-    for fold, (train_idx, test_idx) in enumerate(folds, 1):
-        fit_idx, val_pool = train_test_split(
-            train_idx,
-            test_size=0.2,
-            stratify=y[train_idx],
-            random_state=SEED,
-        )
-        val_idx = balanced_indices(val_pool, y, SEED + fold)
-        assert not np.intersect1d(fit_idx, val_pool).size
-        assert not np.intersect1d(train_idx, test_idx).size
-        fit = seller_history(data.iloc[fit_idx], data.iloc[fit_idx], links)
-        validation = seller_history(
-            data.iloc[val_idx], data.iloc[fit_idx], links
-        )
-        candidates = {name: [] for name in MODEL_NAMES}
-        for method in ("SMOTE", "SMOTENC"):
-            encoder, x, labels = resample_train(fit, y[fit_idx], method)
-            x_val = encoder.transform(validation[FEATURES]).astype(np.float32)
-            for name, model in make_models(fold).items():
-                model.fit(x, labels)
-                selected = select_threshold(
-                    y[val_idx], model.predict_proba(x_val)[:, 1]
-                )
-                if selected is not None:
-                    selected.update(method=method, model=name)
-                candidates[name].append(selected)
-                print(
-                    f"Fold {fold} | {method} | {name}: {selected}", flush=True
-                )
-        selected = {
-            name: choose_method(items) for name, items in candidates.items()
-        }
-        if all(item is not None for item in selected.values()):
-            choices.append(
-                {
-                    "fold": fold,
-                    "models": selected,
-                    "recall": np.mean(
-                        [item["recall"] for item in selected.values()]
-                    ),
-                    "precision": np.mean(
-                        [item["precision"] for item in selected.values()]
-                    ),
-                    "fit_idx": fit_idx,
-                    "val_pool": val_pool,
-                    "val_idx": val_idx,
-                }
-            )
-    if not choices:
-        raise RuntimeError(
-            "No fold satisfies validation precision >= 60% for all models"
-        )
-    best = max(
-        choices,
-        key=lambda item: (item["recall"], item["precision"], -item["fold"]),
+    fold = 4
+    train_idx, test_idx = folds[fold - 1]
+    fit_idx, cal_idx = train_test_split(
+        train_idx,
+        test_size=0.2,
+        stratify=y[train_idx],
+        random_state=SEED,
     )
-    fold = best["fold"]
-    train_idx, test_pool = folds[fold - 1]
-    test_idx = balanced_indices(test_pool, y, SEED + fold)
-    train_features = seller_history(
-        data.iloc[train_idx], data.iloc[train_idx], links
-    )
-    test_features = seller_history(
-        data.iloc[test_idx], data.iloc[train_idx], links
-    )
-    print(
-        f"Selected fold {fold}; mean validation recall={best['recall']:.6f}",
-        flush=True,
-    )
+    assert len(np.unique(np.r_[fit_idx, cal_idx, test_idx])) == len(data)
+    fit = data.iloc[fit_idx]
+    train_features = seller_history(fit, fit, links)
+    calibration = seller_history(data.iloc[cal_idx], fit, links)
+    test_features = seller_history(data.iloc[test_idx], fit, links)
     bundles = {}
-    for method in ("SMOTE", "SMOTENC"):
-        names = [
-            name
-            for name in MODEL_NAMES
-            if best["models"][name]["method"] == method
-        ]
-        if not names:
-            continue
-        encoder, x, labels = resample_train(
-            train_features, y[train_idx], method
-        )
+    for method, names in (
+        ("SMOTE", ["logistic_regression"]),
+        ("SMOTENC", ["random_forest", "lightgbm"]),
+    ):
+        encoder, x, labels = resample_train(train_features, y[fit_idx], method)
+        x_cal = encoder.transform(calibration[FEATURES]).astype(np.float32)
         for name in names:
             model = make_models(fold)[name]
             model.fit(x, labels)
+            scores = model.predict_proba(x_cal)[:, 1]
+            calibrator = LogisticRegression(C=1e6, random_state=SEED).fit(
+                scores[:, None], y[cal_idx]
+            )
             bundle = {
+                "calibrator": calibrator,
                 "model": model,
                 "encoder": encoder,
                 "method": method,
@@ -535,14 +458,17 @@ def train(output_dir):
                 f"AUC={roc_auc_score(y[test_idx], predicted.risk_score):.6f}",
                 flush=True,
             )
+            for field in ("risk_score", "p_late"):
+                brier = brier_score_loss(y[test_idx], predicted[field])
+                print(f"Brier ({field}) = {brier:.6f}")
             bundles[name] = bundle
     output.mkdir(parents=True, exist_ok=True)
     for name, bundle in bundles.items():
         path = output / f"{name}.joblib"
         joblib.dump(bundle, path)
         np.testing.assert_array_equal(
-            predict_late(bundle, test_features).risk_score,
-            predict_late(joblib.load(path), test_features).risk_score,
+            predict_late(bundle, test_features).p_late,
+            predict_late(joblib.load(path), test_features).p_late,
         )
     history_columns = [
         "order_id",
@@ -553,10 +479,8 @@ def train(output_dir):
     ]
     joblib.dump(
         {
-            "train": data.iloc[train_idx][history_columns],
-            "links": links.loc[
-                links.order_id.isin(data.iloc[train_idx].order_id)
-            ],
+            "train": fit[history_columns],
+            "links": links.loc[links.order_id.isin(fit.order_id)],
         },
         output / "seller_history.joblib",
     )
@@ -572,11 +496,9 @@ def train(output_dir):
             key: data.iloc[idx].order_id.tolist()
             for key, idx in {
                 "train": train_idx,
-                "test_pool": test_pool,
                 "test": test_idx,
-                "fit": best["fit_idx"],
-                "validation_pool": best["val_pool"],
-                "validation": best["val_idx"],
+                "fit": fit_idx,
+                "calibration": cal_idx,
             }.items()
         },
     }

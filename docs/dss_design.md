@@ -1,91 +1,38 @@
-# Late risk và mô phỏng ngày hẹn
+# DSS chọn đơn cần can thiệp
 
-`src/ml/late_risk.py` đọc PostgreSQL qua `DATABASE_URL` trong `.env`,
-dùng `get_engine()` chung của repo. Cần chạy ETL trước khi train.
+Quyết định được lập cho các đơn mua trong một ngày. Mỗi model cho một danh sách riêng. Thứ tự ưu tiên dựa trên lợi ích ròng kỳ vọng của việc can thiệp một lần vào đơn hàng.
 
-```powershell
-python -m src.ml.late_risk --output-dir artifacts/models/late_risk/run_01
-```
+    thiệt hại khi trễ = thiệt hại cơ sở × hệ số nhóm khách
+    lợi ích ròng = P(trễ) × thiệt hại khi trễ × hiệu quả − chi phí
 
-Feature lấy từ `dw.fact_order_fulfillment`, `dw.fact_sales` và các dimension
-product, seller, customer, geography. Timestamp giao/hẹn lấy từ
-`staging.orders_typed` để giữ độ chính xác theo thời điểm cho lịch sử seller.
-Hai truy vấn feature và seller links dùng cùng transaction REPEATABLE READ.
-Tổng sản phẩm có nhân quantity, category chọn theo số item và thứ tự tên khi hòa.
-Đơn thiếu feature được loại trước khi chia tập. Dữ liệu sắp xếp theo order_id
-để tái lập split. Dùng output mới/rỗng cho mỗi lần train.
+Hiệu quả là tỷ lệ đơn vốn sẽ trễ mà can thiệp có thể giúp giao đúng hạn. Chi phí và thiệt hại dùng cùng đơn vị tiền. Người vận hành chọn các giả định này. DSS chỉ chọn đơn có lợi ích dương và lấy tối đa số đơn đội vận hành xử lý được trong ngày. Khi hòa lợi ích, ưu tiên xác suất trễ cao hơn rồi mã đơn tăng dần.
 
-Model đã lưu từ CSV cần train lại từ DB để có kết quả tương ứng nguồn mới.
+## Chạy từ thư mục gốc repo
 
-## Chọn model
+Cấu hình DATABASE_URL, chạy ETL và tạo bộ model mới. Fold 4 dùng cùng seed 42 và config đã chọn. Trong outer train, giữ riêng 20% đơn thật có tỷ lệ lớp tự nhiên để fit sigmoid trên điểm của model nền. Phần fit cung cấp lịch sử seller trước lúc mua cho cả ba tập. LR dùng SMOTE, RF và LightGBM dùng SMOTENC, mỗi model nền train 10.000 On time + 10.000 Late. Đánh giá calibration bằng Brier score trước/sau trên toàn bộ test fold 4. Bảng phân loại dùng ngưỡng 0,4 trên điểm thô. DSS dùng trường p_late đã hiệu chỉnh. Artifact chọn theo phiên bản cũ cần train lại.
 
-So sánh SMOTE/SMOTENC trên năm outer fold (stratified, seed 42).
-Mỗi outer train chia fit/validation 80/20; validation giữ toàn bộ Late và
-lấy cùng số On time thật. Chỉ fit preprocessing và lịch sử seller trên fit.
-SMOTE giữ cách encode của notebook; SMOTENC chuẩn hóa numeric và giữ category
-khi tìm láng giềng, sau đó đổi numeric về đơn vị gốc để huấn luyện model.
+    python -m src.ml.late_risk --output-dir artifacts/models/late_risk/calibrated
 
-Chọn ngưỡng có recall Late cao nhất với precision >= 60% trên validation;
-hòa thì chọn F1, rồi ngưỡng cao hơn. Mỗi model chọn SMOTENC khi recall tốt hơn,
-hoặc recall bằng nhưng precision cao hơn; bằng cả hai thì giữ SMOTE.
-Chọn một fold chung theo recall trung bình ba model, rồi precision trung bình,
-rồi fold nhỏ hơn. Nếu không có fold đủ điều kiện, dừng và báo lỗi.
+Chạy K-Means với lịch sử đã biết trước ngày quyết định. Ví dụ với đơn năm 2018, dùng snapshot từ năm 2017. Khi mô phỏng lịch sử, người chạy phải xác nhận các kết quả giao và dữ liệu dùng tạo phân nhóm đã có ở thời điểm đó.
 
-Ba model cuối được refit trên outer train của fold đã chọn, mỗi model đúng
-20.000 dòng (10.000 On time + 10.000 Late sau resampling). LR dùng C theo fold
-đã tuning; RF/LightGBM giữ config notebook. Test là đơn thật 50:50, không dùng
-chọn cấu hình. Báo cáo chỉ in ra console, không lưu metrics/biểu đồ vào artifact.
+    python -m src.ml.kmean --start-year 2017 --end-year 2017
 
-Output gồm ba bundle `.joblib` (model, encoder/scaler, ngưỡng, phương pháp,
-fold/seed), `seller_history.joblib`, `manifest.json` chứa ID split và
-`example_orders.csv`. Chỉ nạp joblib tin cậy do chính bạn tạo.
+Tạo factors.json ánh xạ tên nhóm trong customer_segments.csv sang hệ số thiệt hại. Ví dụ giả định:
 
-## What-if
+    {"Khách mua lại": 1.5, "Khách chi tiêu cao nhất": 1.5, "Khách chi tiêu cao": 1.3, "Khách chi tiêu thấp": 1, "Khách lâu chưa mua": 1}
 
-Chức năng review cũ đã được thay bằng late risk; tham khảo cách so sánh
-baseline/kịch bản của [World Model for Business](https://github.com/noorafaelhakimfaudka-droid/world-model-business).
-Không dùng bảng kết quả tính sẵn hoặc hệ số ROI của repo tham khảo.
+Khách thiếu trong snapshot nhận nhóm “Chưa phân nhóm” với hệ số 1. Ví dụ thử thiệt hại cơ sở 100 đơn vị tiền, chi phí 2 hoặc 5, hiệu quả 25% hoặc 50%, năng lực 10 đơn hoặc không giới hạn:
 
-```powershell
-python -m src.dss.whatif --model-dir artifacts/models/late_risk/run_01 --orders-file artifacts/models/late_risk/run_01/example_orders.csv --estimated-days 0 1 2 3
-```
+    python -m src.dss.whatif --day 2018-05-01 --model-dir artifacts/models/late_risk/calibrated --segments output/kmeans/customer_segments.csv --factors factors.json --loss 100 --cost 2 5 --efficacy 0.25 0.5 --capacity 10 all --output-dir output/dss/demo
 
-Hoặc gọi `run_whatif(model_dir, orders, estimated_days=3)` từ Python.
-`--estimated-days` mặc định là 0, 1, 2, 3. Số âm cho phép hẹn sớm hơn,
-nhưng ngày hẹn không được trước ngày mua. Không còn tham số `delivery_days`.
+CLI đọc các đơn đủ feature mua trong ngày từ DW, tạo seller history từ artifact và chỉ chấm điểm mỗi model một lần. Trong Python, gọi score_orders(model_dir, orders, segments, factors), sau đó run_whatif(scores, links, loss, costs, efficacies, capacities). Dùng None cho năng lực không giới hạn. Tham số đầu tiên trong mỗi danh sách xác định kịch bản gốc cho tornado.
 
-Đầu vào là một dòng mỗi đơn, không cần ngày giao thực tế hoặc nhãn:
+## Đọc kết quả
 
-- `order_id`, `order_purchase_timestamp`, `order_estimated_delivery_date`.
-- `distance_km`, `freight_value`, `shipping_days_estimated` (làm tròn 2 chữ số).
-- `order_weekday` (thứ Hai = 0), `order_purchase_month` (1..12).
-- `item_physical_score`, `product_category_name`.
-- `delayed_orders_by_seller`, `delay_rate_percent_by_seller` (0..100),
-  `seller_avg_delay_days` (có thể âm).
+- orders.csv gồm thiệt hại, lợi ích gộp/ròng nếu can thiệp, chi phí, thứ hạng và cờ selected cho từng đơn/model/kịch bản.
+- summary.csv chỉ cộng chi phí và lợi ích của các đơn được chọn. Số đơn trễ kỳ vọng tránh được là tổng P(trễ) × hiệu quả trên các đơn đó.
+- sellers.csv và routes.csv phân bổ số đơn và tổng xác suất trễ của toàn bộ ứng viên, cùng lợi ích thực hiện theo kịch bản. Mỗi đơn đóng góp đều cho các seller riêng biệt hoặc các tuyến riêng biệt nên số đơn phân bổ có thể là số thập phân. Tuyến là bang seller đến bang khách.
+- sensitivity.csv và tornado.png thể hiện thay đổi tổng lợi ích khi thay riêng chi phí, thiệt hại cơ sở hoặc hiệu quả ±20%. Hiệu quả giới hạn ở [0, 1]. DSS chọn lại đơn ở mỗi đầu tham số, giữ nguyên năng lực.
+- review_stats.csv mô tả lịch sử các đơn có review hợp lệ trong DW. Đơn có nhiều review được tính điểm sao và tỷ lệ review 1–2 sao trung bình trong đơn trước khi lấy trung bình theo trạng thái giao. Mỗi đơn có cùng trọng số. Các thống kê này dùng để đối chiếu giả định; giá trị tiền tệ và hiệu quả can thiệp do người dùng nhập.
 
-Lịch sử seller phải được tính trước thời điểm mua, chỉ từ dữ liệu train.
-Có thể dùng `seller_history(query, train, links)` và dữ liệu trong
-`seller_history.joblib`; links phải bổ sung cặp order_id/seller_id của đơn mới.
-Seller chưa có lịch sử nhận 0. Đơn nhiều seller dùng trung bình như notebook.
-Module kiểm tra đầu vào và không tự loại đơn lỗi.
-
-Mỗi đơn có hai dòng before/after cho mỗi model. Output gồm ngày hẹn,
-`risk_score`, `threshold`, `predicted_label` (0 On time, 1 Late), `label`,
-`risk_delta` (after trừ before), `baseline_label`. `summarize(results)` đếm
-cảnh báo trước/sau và chuyển nhãn theo cả hai chiều.
-
-Chỉ ngày hẹn và shipping_days_estimated thay đổi; lịch sử seller giữ nguyên.
-Không ghi thay đổi vào DW hoặc train lại khi chạy what-if.
-
-## Giới hạn
-
-Precision >= 60% chỉ áp dụng validation 50:50; không bảo đảm ở test hoặc phân
-bố thật. Điểm rủi ro chưa calibration. Chọn fold tốt nhất là thí nghiệm mang
-tính khám phá: các outer fold chồng lấn dữ liệu phát triển, không thay thế một
-tập holdout mới chưa từng dùng. Không coi đây là đánh giá độc lập triển khai.
-
-Thay ngày hẹn có thể đổi nhãn trễ so với cam kết, không làm hàng giao nhanh
-hơn và không chứng minh quan hệ nhân quả. Không ép điểm rủi ro phải giảm khi
-cộng ngày: kết quả phản ánh model thực tế. Chưa thêm review, ROI hoặc UI.
-
-Ngưỡng dự đoán cuối của cả ba model được đặt cố định 0,4 theo lựa chọn người dùng. Ngưỡng validation phía trên chỉ phục vụ chọn fold và phương pháp resampling.
+Lợi ích và số đơn tránh trễ là kỳ vọng theo giả định. Đánh giá hiệu quả thực tế cần dữ liệu về các can thiệp đã thực hiện.

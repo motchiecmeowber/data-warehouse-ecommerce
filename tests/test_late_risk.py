@@ -6,17 +6,16 @@ import pandas as pd
 import pytest
 from sklearn.dummy import DummyClassifier
 
-from src.dss.whatif import build_scenario, run_whatif, summarize
+from src.dss.whatif import evaluate, plot_tornado, run_whatif, score_orders
 from src.ml.late_risk import (
     CATEGORICAL,
     FEATURES,
     HISTORY,
     MODEL_NAMES,
     NUMERIC,
-    choose_method,
+    predict_late,
     prepare_orders,
     resample_train,
-    select_threshold,
     seller_history,
 )
 
@@ -33,22 +32,6 @@ def orders(n=4):
         "books" if i % 2 else "toys" for i in range(n)
     ]
     return data
-
-
-def test_threshold_maximizes_recall_with_precision_floor():
-    y = np.array([1, 0, 1, 0, 1, 0])
-    scores = np.array([0.9, 0.8, 0.7, 0.6, 0.5, 0.4])
-    chosen = select_threshold(y, scores)
-    assert chosen["threshold"] == 0.5
-    assert chosen["precision"] == 0.6
-    assert chosen["recall"] == 1
-    assert select_threshold([0, 1], [0.5, 0.5]) is None
-    a = dict(chosen, method="SMOTE")
-    b = dict(chosen, method="SMOTENC")
-    assert choose_method([b, a])["method"] == "SMOTE"
-    b["precision"] = 0.7
-    assert choose_method([a, b])["method"] == "SMOTENC"
-    assert choose_method([None]) is None
 
 
 @pytest.mark.parametrize("method", ["SMOTE", "SMOTENC"])
@@ -109,11 +92,59 @@ def test_seller_history_uses_only_known_training_outcomes():
     )
 
 
-def test_whatif_zero_and_date_validation(tmp_path):
+def test_intervention_scenarios(tmp_path):
+    scores = pd.DataFrame(
+        {
+            "order_id": ["b", "a", "c"],
+            "p_late": [0.5, 0.5, 0.25],
+            "factor": [1, 1, 2],
+            "model": "lightgbm",
+        }
+    )
+    links = pd.DataFrame(
+        {
+            "order_id": ["a", "a", "b", "c"],
+            "seller_id": ["x", "y", "y", "x"],
+            "seller_state": "SP",
+            "customer_state": "RJ",
+        }
+    )
+    tables = run_whatif(scores, links, 100, [20, 25], [0.5], [1, 0, 20])
+    base = tables["orders"].query("cost == 20 and capacity == 1")
+    assert base.order_id.tolist() == ["a", "b", "c"]
+    assert base.selected.tolist() == [True, False, False]
+    summary = tables["summary"].query("cost == 20 and capacity == 1").iloc[0]
+    assert (summary.avoided_late, summary.gross, summary.net) == (0.25, 25, 5)
+    for key in ["sellers", "routes"]:
+        grouped = tables[key].query("cost == 20 and capacity == 1")
+        assert grouped.orders.sum() == 3
+        assert grouped.selected_net.sum() == 5
+        assert grouped.expected_late.sum() == 1.25
+    assert (
+        not tables["orders"]
+        .query("cost == 25 or capacity == 0")
+        .selected.any()
+    )
+    assert evaluate(scores, 100, 0, 1).selected.all()
+    assert not evaluate(scores, 100, 0, 0).selected.any()
+    assert evaluate(scores, 100, 20, 0.5, 20).selected.all()
+    tornado = tables["sensitivity"]
+    assert tornado.query("parameter == 'cost'").net.tolist() == [9, 1]
+    assert tornado.query("parameter == 'efficacy'").net.tolist() == [0, 10]
+    assert tornado.query("parameter == 'loss'").net.tolist() == [0, 10]
+    plot_tornado(tornado, tmp_path / "tornado.png")
+    assert (tmp_path / "tornado.png").stat().st_size > 0
+
+
+def test_calibrated_scoring_and_segments(tmp_path):
     from sklearn.compose import ColumnTransformer
     from sklearn.preprocessing import OneHotEncoder
 
     data = orders()
+    data["customer_unique_id"] = ["u", "u", "v", "w"]
+    segments = pd.DataFrame(
+        {"customer_unique_id": ["u"], "kmeans_segment": ["A"]}
+    )
     encoder = ColumnTransformer(
         [
             ("numeric", "passthrough", NUMERIC),
@@ -122,35 +153,16 @@ def test_whatif_zero_and_date_validation(tmp_path):
     )
     x = encoder.fit_transform(data[FEATURES])
     model = DummyClassifier(strategy="prior").fit(x, [0, 0, 1, 1])
+    bundle = dict(encoder=encoder, model=model, threshold=0.4)
+    with pytest.raises(ValueError, match="retrain"):
+        predict_late(bundle, data)
+    bundle["calibrator"] = DummyClassifier(strategy="prior").fit(
+        np.ones((4, 1)), [0, 0, 0, 1]
+    )
     for name in MODEL_NAMES:
-        joblib.dump(
-            {
-                "model": model,
-                "encoder": encoder,
-                "threshold": 0.4,
-                "fold": 2,
-                "seed": 42,
-            },
-            tmp_path / f"{name}.joblib",
-        )
-    result = run_whatif(tmp_path, data, 0)
-    assert len(result) == 6 * len(data)
-    assert result.risk_delta.eq(0).all()
-    summary = summarize(result)
-    assert summary.alerts_before.equals(summary.alerts_after)
-    assert summary[["on_time_to_late", "late_to_on_time"]].sum().sum() == 0
-    scenario = build_scenario(data, 3)
-    assert scenario.shipping_days_estimated.eq(13).all()
-    pd.testing.assert_frame_equal(scenario[HISTORY], data[HISTORY])
-    for days in [-11, True, 1.5]:
-        with pytest.raises(ValueError):
-            build_scenario(data, days)
-    for invalid in [
-        pd.concat([data, data]),
-        data.drop(columns=["distance_km"]),
-    ]:
-        with pytest.raises(ValueError):
-            prepare_orders(invalid)
-    data.loc[0, "distance_km"] = np.inf
+        joblib.dump(bundle, tmp_path / f"{name}.joblib")
+    scored = score_orders(tmp_path, data, segments, {"A": 2})
+    assert len(scored) == 12 and scored.p_late.eq(0.25).all()
+    assert scored.factor.tolist() == [2, 2, 1, 1] * 3
     with pytest.raises(ValueError):
-        prepare_orders(data)
+        score_orders(tmp_path, data, pd.concat([segments, segments]), {"A": 2})

@@ -153,17 +153,16 @@ Lưu ý trên macOS:
 5. Train ba model giao trễ và chạy what-if (cần cấu hình `DATABASE_URL` và chạy ETL):
    ```bash
    python -m src.ml.late_risk --output-dir artifacts/models/late_risk/run_01
-   python -m src.dss.whatif --model-dir artifacts/models/late_risk/run_01 --orders-file artifacts/models/late_risk/run_01/example_orders.csv
+   python -m src.dss.whatif --help
    ```
 6. Mở dashboard:
    ```bash
    streamlit run src/app/app.py
    ```
 
-Chi tiết chọn fold, SMOTE/SMOTENC, feature đầu vào và giới hạn what-if:
-[Thiết kế DSS](docs/dss_design.md). Mỗi model cuối train 20.000 dòng cân bằng;
-chọn theo recall Late với precision validation tối thiểu 60%. Chỉ in báo cáo,
-không lưu precision/recall/F1 vào artifact. What-if mặc định thử cộng 0–3 ngày hẹn.
+DSS xếp hạng đơn theo lợi ích can thiệp kỳ vọng, dùng xác suất đã hiệu chỉnh,
+nhóm khách K-Means và năng lực xử lý trong ngày. Xem [hướng dẫn train và chạy
+kịch bản](docs/dss_design.md).
 
 ## Notebook đánh giá giao trễ
 
