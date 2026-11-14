@@ -18,239 +18,13 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sqlalchemy import text
+
+from src.common.db import get_engine
 
 SEED = 42
 MODEL_NAMES = ("logistic_regression", "random_forest", "lightgbm")
 LR_C = (1, 1, 10, 0.001, 0.1)
-
-FILES = {
-    "orders": "olist_orders_dataset.csv",
-    "items": "olist_order_items_dataset.csv",
-    "customers": "olist_customers_dataset.csv",
-    "sellers": "olist_sellers_dataset.csv",
-    "products": "olist_products_dataset.csv",
-    "geo": "olist_geolocation_dataset.csv",
-    "translation": "product_category_name_translation.csv",
-}
-
-
-def transform(raw):
-    tables = {name: frame.copy() for name, frame in raw.items()}
-    audit = []
-
-    def log(step, count):
-        audit.append({"check": step, "rows": int(count)})
-
-    def numeric(frame, columns):
-        for col in columns:
-            source = frame[col]
-            frame[col] = pd.to_numeric(source, errors="coerce").astype(float)
-            log(
-                f"invalid_numeric:{col}",
-                (source.notna() & frame[col].isna()).sum(),
-            )
-
-    o, i, p = tables["orders"], tables["items"], tables["products"]
-    c, s, g, tr = (
-        tables[k] for k in ["customers", "sellers", "geo", "translation"]
-    )
-    dates = [
-        "order_purchase_timestamp",
-        "order_approved_at",
-        "order_delivered_carrier_date",
-        "order_delivered_customer_date",
-        "order_estimated_delivery_date",
-    ]
-    for col in dates:
-        source = o[col]
-        o[col] = pd.to_datetime(source, errors="coerce", format="mixed")
-        log(f"invalid_date:{col}", (source.notna() & o[col].isna()).sum())
-    for frame, key in [
-        (o, "order_id"),
-        (p, "product_id"),
-        (c, "customer_id"),
-        (s, "seller_id"),
-    ]:
-        assert (
-            frame[key].notna().all() and frame[key].is_unique
-        ), f"Khóa lỗi: {key}"
-    assert tr.product_category_name.is_unique, "Bảng dịch trùng category"
-    numeric(i, ["price", "freight_value"])
-    physical = [
-        "product_weight_g",
-        "product_length_cm",
-        "product_height_cm",
-        "product_width_cm",
-    ]
-    numeric(p, physical)
-    p["product_weight_g"] = p.product_weight_g.mask(p.product_weight_g.eq(0))
-    p["item_physical_score"] = p[physical].prod(axis=1, min_count=4) / 1000
-    translations = tr.set_index(
-        "product_category_name"
-    ).product_category_name_english.to_dict()
-    translations.setdefault("pc_gamer", "pc_gamer")
-    translations.setdefault(
-        "portateis_cozinha_e_preparadores_de_alimentos",
-        "portable_kitchen_and_food_preparers",
-    )
-    category = p.product_category_name.fillna("unknown")
-    p["product_category_name"] = category.map(translations).where(
-        category.ne("unknown"), "unknown"
-    )
-
-    before = len(g)
-    g = g.drop_duplicates().copy()
-    log("duplicate_geo_removed", before - len(g))
-    numeric(g, ["geolocation_lat", "geolocation_lng"])
-    g["zip"] = g.geolocation_zip_code_prefix.str.zfill(5)
-    inside = g.geolocation_lat.between(-33.8, 5.3) & g.geolocation_lng.between(
-        -74, -34.7
-    )
-    log("geo_outside_bbox_or_missing", (~inside).sum())
-    # R18: ZIP không có tọa độ hợp lệ vẫn có thể join, nhưng tọa độ giữ null.
-    geo = (
-        g.loc[inside]
-        .groupby("zip")[["geolocation_lat", "geolocation_lng"]]
-        .median()
-        .round(6)
-    )
-    for frame, prefix in [(c, "customer"), (s, "seller")]:
-        frame["zip"] = frame[f"{prefix}_zip_code_prefix"].str.zfill(5)
-        coords = geo.rename(
-            columns={
-                "geolocation_lat": f"{prefix}_lat",
-                "geolocation_lng": f"{prefix}_lng",
-            }
-        )
-        joined = frame.join(coords, on="zip", validate="many_to_one")
-        if prefix == "customer":
-            c = joined
-        else:
-            s = joined
-
-    log("items_missing_price_removed", i.price.isna().sum())
-    i = i.loc[i.price.notna()].copy()
-    log(
-        "orders_missing_purchase_removed",
-        o.order_purchase_timestamp.isna().sum(),
-    )
-    o = o.loc[o.order_purchase_timestamp.notna()].copy()
-    delivered, estimated = (
-        o.order_delivered_customer_date,
-        o.order_estimated_delivery_date,
-    )
-    purchased, approved, carrier = (
-        o.order_purchase_timestamp,
-        o.order_approved_at,
-        o.order_delivered_carrier_date,
-    )
-    o["delay_days"] = (
-        delivered.dt.normalize() - estimated.dt.normalize()
-    ).dt.days
-    o["is_late"] = o.delay_days.gt(0).where(
-        delivered.notna() & estimated.notna()
-    )
-    o["has_missing_milestone"] = o.order_status.eq("delivered") & (
-        approved.isna() | carrier.isna() | delivered.isna()
-    )
-    o["has_time_anomaly"] = (
-        (carrier < purchased)
-        | (carrier < approved)
-        | (delivered < carrier)
-        | (o.order_status.ne("delivered") & delivered.notna())
-    )
-    o["shipping_days_estimated"] = (
-        (estimated - purchased).dt.total_seconds() / 86400
-    ).round(2)
-    o.loc[estimated < purchased, "shipping_days_estimated"] = np.nan
-    o["order_weekday"] = purchased.dt.dayofweek
-    o["order_purchase_month"] = purchased.dt.month
-
-    rows = (
-        i.merge(
-            o[["order_id", "customer_id"]],
-            on="order_id",
-            validate="many_to_one",
-        )
-        .merge(
-            p[["product_id", "product_category_name", "item_physical_score"]],
-            on="product_id",
-            how="left",
-            validate="many_to_one",
-        )
-        .merge(
-            s[["seller_id", "seller_lat", "seller_lng"]],
-            on="seller_id",
-            how="left",
-            validate="many_to_one",
-        )
-        .merge(
-            c[["customer_id", "customer_lat", "customer_lng"]],
-            on="customer_id",
-            how="left",
-            validate="many_to_one",
-        )
-    )
-    lat_s, lon_s, lat_c, lon_c = [
-        np.radians(rows[col].astype(float))
-        for col in ["seller_lat", "seller_lng", "customer_lat", "customer_lng"]
-    ]
-    a = (
-        np.sin((lat_c - lat_s) / 2) ** 2
-        + np.cos(lat_s) * np.cos(lat_c) * np.sin((lon_c - lon_s) / 2) ** 2
-    )
-    rows["distance_km"] = 2 * 6371 * np.arcsin(np.sqrt(a.clip(0, 1)))
-    group = rows.groupby("order_id", sort=False)
-    features = group.agg(
-        freight_value=("freight_value", "sum"),
-        distance_km=("distance_km", "max"),
-        item_physical_score=("item_physical_score", "sum"),
-    )
-    for col in features:
-        features.loc[group[col].count().lt(group.size()), col] = np.nan
-    categories = (
-        rows.dropna(subset=["product_category_name"])
-        .groupby(["order_id", "product_category_name"])
-        .size()
-        .rename("n")
-        .reset_index()
-        .sort_values(
-            ["order_id", "n", "product_category_name"],
-            ascending=[True, False, True],
-        )
-        .drop_duplicates("order_id")
-        .set_index("order_id")
-        .product_category_name
-    )
-    features["product_category_name"] = categories
-    fact = o.merge(features, on="order_id", how="left", validate="one_to_one")
-    labeled = fact.loc[fact.is_late.notna()].copy()
-    log("warehouse_orders", len(fact))
-    log("unlabeled_orders_excluded_from_ML", len(fact) - len(labeled))
-    static = [
-        "distance_km",
-        "freight_value",
-        "shipping_days_estimated",
-        "order_weekday",
-        "order_purchase_month",
-        "product_category_name",
-        "item_physical_score",
-    ]
-    data = labeled.dropna(subset=static).reset_index(drop=True)
-    log("labeled_missing_static_features_excluded", len(labeled) - len(data))
-    log("retained_time_anomaly", data.has_time_anomaly.sum())
-    log("retained_missing_milestone", data.has_missing_milestone.sum())
-    data["is_late"] = data.is_late.astype(int)
-    links = rows[["order_id", "seller_id"]].drop_duplicates()
-    assert links.seller_id.notna().all(), "Seller bị thiếu"
-    assert data.order_id.is_unique
-    assert np.isfinite(
-        data[[x for x in static if x != "product_category_name"]].to_numpy(
-            float
-        )
-    ).all()
-    return data, links, pd.DataFrame(audit)
-
 
 HISTORY = [
     "delayed_orders_by_seller",
@@ -319,19 +93,94 @@ def seller_history(query, train, links):
 FEATURES = NUMERIC + CATEGORICAL
 
 
-def load_orders(data_dir):
-    """Read the same raw CSVs and ETL rules as the standalone notebook."""
-    data_dir = Path(data_dir)
-    missing = [
-        name for name in FILES.values() if not (data_dir / name).is_file()
-    ]
-    if missing:
-        raise FileNotFoundError(f"Missing CSVs in {data_dir}: {missing}")
-    raw = {
-        key: pd.read_csv(data_dir / name, dtype="string", encoding="utf-8-sig")
-        for key, name in FILES.items()
-    }
-    data, links, _ = transform(raw)
+QUERY = """
+WITH items AS (
+    SELECT s.order_id, seller.seller_id, s.quantity,
+           s.freight_total,
+           p.category_name_en AS product_category_name,
+           p.weight_g * p.length_cm * p.height_cm * p.width_cm
+               * s.quantity / 1000.0 AS item_physical_score,
+           2 * 6371 * asin(sqrt(least(1.0, greatest(0.0,
+               power(sin(radians(cg.latitude - sg.latitude) / 2), 2)
+               + cos(radians(sg.latitude)) * cos(radians(cg.latitude))
+               * power(sin(radians(cg.longitude - sg.longitude) / 2), 2)
+           )))) AS distance_km,
+           cg.latitude AS customer_lat, sg.latitude AS seller_lat,
+           cg.longitude AS customer_lng, sg.longitude AS seller_lng
+    FROM dw.fact_sales s
+    JOIN dw.dim_product p ON p.product_key = s.product_key
+    JOIN dw.dim_seller seller ON seller.seller_key = s.seller_key
+    JOIN dw.dim_customer c ON c.customer_key = s.customer_key
+    JOIN dw.dim_geography cg ON cg.geography_key = c.geography_key
+    JOIN dw.dim_geography sg ON sg.geography_key = seller.geography_key
+), categories AS (
+    SELECT order_id, product_category_name,
+           row_number() OVER (
+               PARTITION BY order_id
+               ORDER BY sum(quantity) DESC, product_category_name
+           ) AS rank
+    FROM items
+    WHERE product_category_name IS NOT NULL
+    GROUP BY order_id, product_category_name
+), totals AS (
+    SELECT order_id,
+           CASE WHEN count(*) = count(freight_total)
+                THEN sum(freight_total) END AS freight_value,
+           CASE WHEN count(*) = count(item_physical_score)
+                THEN sum(item_physical_score) END AS item_physical_score,
+           CASE WHEN count(*) = count(customer_lat)
+                  AND count(*) = count(seller_lat)
+                  AND count(*) = count(customer_lng)
+                  AND count(*) = count(seller_lng)
+                THEN max(distance_km) END AS distance_km
+    FROM items GROUP BY order_id
+)
+SELECT f.order_id, f.order_purchase_timestamp,
+       t.order_delivered_customer_date, t.order_estimated_delivery_date,
+       f.promised_days AS shipping_days_estimated,
+       f.is_late, f.delay_days,
+       totals.freight_value, totals.item_physical_score, totals.distance_km,
+       categories.product_category_name
+FROM dw.fact_order_fulfillment f
+JOIN staging.orders_typed t ON t.order_id = f.order_id
+JOIN totals ON totals.order_id = f.order_id
+LEFT JOIN categories
+    ON categories.order_id = f.order_id AND categories.rank = 1
+WHERE f.is_late IS NOT NULL
+ORDER BY f.order_id
+"""
+
+LINKS_QUERY = """
+SELECT DISTINCT f.order_id, s.seller_id
+FROM dw.fact_sales f
+JOIN dw.dim_seller s ON s.seller_key = f.seller_key
+WHERE s.seller_id IS NOT NULL
+ORDER BY f.order_id, s.seller_id
+"""
+
+
+def load_orders(connection):
+    """Read ETL-cleaned warehouse features and exact milestone timestamps."""
+    data = pd.read_sql_query(text(QUERY), connection)
+    links = pd.read_sql_query(text(LINKS_QUERY), connection)
+    for col in [
+        "order_purchase_timestamp",
+        "order_delivered_customer_date",
+        "order_estimated_delivery_date",
+    ]:
+        data[col] = pd.to_datetime(data[col])
+    purchase = data.order_purchase_timestamp
+    data["order_weekday"] = purchase.dt.dayofweek
+    data["order_purchase_month"] = purchase.dt.month
+    static = [col for col in FEATURES if col not in HISTORY]
+    data = data.dropna(subset=static).reset_index(drop=True)
+    if data.empty or not data.order_id.is_unique:
+        raise ValueError("DW must contain eligible orders with unique IDs")
+    data["is_late"] = data.is_late.astype(int)
+    if set(data.is_late.unique()) != {0, 1}:
+        raise ValueError("DW must contain both on-time and late orders")
+    if not data.order_id.isin(links.order_id).all():
+        raise ValueError("Missing seller links for eligible orders")
     return data, links
 
 
@@ -550,14 +399,21 @@ def predict_late(bundle, orders):
     )
 
 
-def train(data_dir, output_dir):
+def train(output_dir):
     """Select on validation, then refit and evaluate one common outer fold."""
     output = Path(output_dir)
     if output.exists() and any(output.iterdir()):
         raise FileExistsError(
             "Use an empty output directory for this training run"
         )
-    data, links = load_orders(data_dir)
+    engine = get_engine()
+    try:
+        with engine.connect().execution_options(
+            isolation_level="REPEATABLE READ"
+        ) as connection:
+            data, links = load_orders(connection)
+    finally:
+        engine.dispose()
     y = data.is_late.to_numpy(int)
     folds = list(
         StratifiedKFold(
@@ -738,7 +594,6 @@ def train(data_dir, output_dir):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data-dir", type=Path, default=Path("data/raw"))
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
-    train(args.data_dir, args.output_dir)
+    train(args.output_dir)

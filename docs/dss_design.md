@@ -1,14 +1,21 @@
 # Late risk và mô phỏng ngày hẹn
 
-`src/ml/late_risk.py` dùng ETL/features từ notebook độc lập. Chạy từ gốc repo:
+`src/ml/late_risk.py` đọc PostgreSQL qua `DATABASE_URL` trong `.env`,
+dùng `get_engine()` chung của repo. Cần chạy ETL trước khi train.
 
 ```powershell
-python -m src.ml.late_risk --data-dir data/raw --output-dir artifacts/models/late_risk/run_01
+python -m src.ml.late_risk --output-dir artifacts/models/late_risk/run_01
 ```
 
-Thư mục raw cần bảy CSV Olist: orders, order_items, customers, sellers,
-products, geolocation và product_category_name_translation. Dùng thư mục
-output mới/rỗng để tránh trộn model giữa các lần chạy.
+Feature lấy từ `dw.fact_order_fulfillment`, `dw.fact_sales` và các dimension
+product, seller, customer, geography. Timestamp giao/hẹn lấy từ
+`staging.orders_typed` để giữ độ chính xác theo thời điểm cho lịch sử seller.
+Hai truy vấn feature và seller links dùng cùng transaction REPEATABLE READ.
+Tổng sản phẩm có nhân quantity, category chọn theo số item và thứ tự tên khi hòa.
+Đơn thiếu feature được loại trước khi chia tập. Dữ liệu sắp xếp theo order_id
+để tái lập split. Dùng output mới/rỗng cho mỗi lần train.
+
+Model đã lưu từ CSV cần train lại từ DB để có kết quả tương ứng nguồn mới.
 
 ## Chọn model
 

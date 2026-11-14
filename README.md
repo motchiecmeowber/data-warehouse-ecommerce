@@ -150,9 +150,9 @@ Lưu ý trên macOS:
    ```bash
    python -m src.etl.run_etl
    ```
-5. Train ba model giao trễ và chạy what-if (cần CSV Olist ở `data/raw`):
+5. Train ba model giao trễ và chạy what-if (cần cấu hình `DATABASE_URL` và chạy ETL):
    ```bash
-   python -m src.ml.late_risk --data-dir data/raw --output-dir artifacts/models/late_risk/run_01
+   python -m src.ml.late_risk --output-dir artifacts/models/late_risk/run_01
    python -m src.dss.whatif --model-dir artifacts/models/late_risk/run_01 --orders-file artifacts/models/late_risk/run_01/example_orders.csv
    ```
 6. Mở dashboard:
