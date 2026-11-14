@@ -150,15 +150,24 @@ Lưu ý trên macOS:
    ```bash
    python -m src.etl.run_etl
    ```
-5. Train và chấm điểm mô hình:
+5. Train ba model giao trễ và chạy what-if (cần CSV Olist ở `data/raw`):
    ```bash
-   python -m src.ml.train
-   python -m src.ml.predict
+   python -m src.ml.late_risk --data-dir data/raw --output-dir artifacts/models/late_risk/run_01
+   python -m src.dss.whatif --model-dir artifacts/models/late_risk/run_01 --orders-file artifacts/models/late_risk/run_01/example_orders.csv
    ```
 6. Mở dashboard:
    ```bash
    streamlit run src/app/app.py
    ```
+
+Chi tiết chọn fold, SMOTE/SMOTENC, feature đầu vào và giới hạn what-if:
+[Thiết kế DSS](docs/dss_design.md). Mỗi model cuối train 20.000 dòng cân bằng;
+chọn theo recall Late với precision validation tối thiểu 60%. Chỉ in báo cáo,
+không lưu precision/recall/F1 vào artifact. What-if mặc định thử cộng 0–3 ngày hẹn.
+
+## Notebook đánh giá giao trễ
+
+[late_risk_paper_pipeline.ipynb](notebooks/late_risk_paper_pipeline.ipynb): tải riêng lên Colab/Kaggle/Jupyter, bật Internet và chọn **Run All**. Notebook tự tải Olist, tiền xử lý bằng pandas và chạy Logistic Regression / Random Forest / LightGBM qua 5 fold. So sánh Manual train 2:1 với SMOTE train 10.000+10.000 trên cùng test 50:50 gồm đơn thật, giữ config model đã chọn; Manual dùng ngưỡng 0,5, SMOTE dùng ngưỡng validation lưu theo fold. Có thêm bảng đối chiếu cả hai cùng ngưỡng 0,5. Không cần PostgreSQL. Bảng điểm, dự đoán và confusion matrix lưu trong `late_risk_results/balance_comparison/`. Các giả định và giới hạn so với paper được ghi trong notebook.
 
 ## Phân công
 

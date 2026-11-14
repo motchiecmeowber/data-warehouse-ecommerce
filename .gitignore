@@ -25,6 +25,7 @@ artifacts/models/*
 
 # Notebook / IDE
 .ipynb_checkpoints/
+late_risk_results/
 .vscode/
 .idea/
 .DS_Store
