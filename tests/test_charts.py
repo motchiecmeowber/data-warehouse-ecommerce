@@ -16,7 +16,7 @@ def test_chart_helpers_build_valid_specs():
         charts.grouped_bar(df, "m", "v", "g", "t", "x", "y", {"a": charts.RED, "b": charts.GREEN}, pct=True),
         charts.heatmap(df, "s", "g", "v", "t", pct=True),
         charts.pareto(df, "v", "n", "t", "x", "y"),
-        charts.scatter(df, "v", "n", "n", "g", ["s"], "t", "x", "y", "size", "color"),
+        charts.scatter(df, "v", "n", "n", "g", [charts.alt.Tooltip("s")], "t", "x", "y", "size", "color"),
         charts.tradeoff(pd.DataFrame({"promise_days": [1, 2], "late_rate": [0.5, 0.1], "expected_review": [3.0, 4.0]}), 0.05, 2),
     ]
     for spec in specs:

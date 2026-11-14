@@ -58,14 +58,14 @@ def test_olap_explorer_drilldown_and_pivot():
     ms = {m.label: m for m in at.multiselect}
     ms["Chiều ở cột (pivot)"].set_value(["customer_region"]).run()
     assert_clean(at)
-    assert "Sudeste" in at.dataframe[0].value.columns
+    assert "Đông Nam (Sudeste)" in at.dataframe[0].value.columns
 
 
 def test_dss_recommendation_changes_with_target():
     at = run("6_DSS_ngay_hen_giao.py")
     assert_clean(at)
     loose = next(m.value for m in at.metric if m.label == "Gợi ý ngày hẹn")
-    at.sidebar.slider[0].set_value(0.01).run()                # mục tiêu trễ 1% chặt hơn 5%
+    at.sidebar.slider[0].set_value(1).run()                   # mục tiêu trễ 1% chặt hơn 5%
     assert_clean(at)
     strict = next(m.value for m in at.metric if m.label == "Gợi ý ngày hẹn")
     assert int(strict.split()[0]) > int(loose.split()[0])
