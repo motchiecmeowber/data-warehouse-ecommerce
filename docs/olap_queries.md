@@ -60,7 +60,7 @@ Mỗi file chạy được bằng `psql -f` hoặc trong tab Truy vấn SQL củ
 | Logistics | Tỷ lệ trễ và thời gian giao theo tháng, bang, tuyến (heatmap người bán × khách), thời gian từng chặng, điểm đánh giá khi giao trễ | `mv_delivery_cube`, `v_fulfillment` |
 | Người bán | Scorecard, top doanh thu, tỷ lệ trễ so với điểm đánh giá, mức tập trung doanh thu | `mv_seller_scorecard` |
 | OLAP explorer | Chọn số đo và phân cấp (roll-up, drill-down bằng cách đổi mức chi tiết), slice, dice bằng bộ lọc, pivot, ROLLUP, tải CSV, xem SQL sinh ra; tab SQL chỉ đọc | `mv_sales_cube` |
-| Mô hình ML | Đọc số liệu `reports/metrics`, biểu đồ `reports/figures` do P3 ghi ra | file |
+| Phân cụm khách hàng | Phân cụm khách hàng bằng K-Means theo RFM (P3) | `dw` |
 | DSS ngày hẹn giao | Gợi ý số ngày hẹn theo tuyến × danh mục, what-if, độ nhạy, tuyến cần xem lại | `v_fulfillment`, `v_review` |
 
 Biểu đồ dùng Altair, màu và font cấu hình trong `.streamlit/config.toml`. Mỗi tab chỉ chạy truy vấn khi được mở, kết quả truy vấn được cache 10 phút (tối đa 256 mục). Kiểm thử giao diện: `tests/test_app_pages.py`, `tests/test_charts.py`.
@@ -69,7 +69,7 @@ Giao diện hiển thị nhãn tiếng Việt cho các giá trị mã (danh mụ
 
 Bộ lọc chung ở thanh bên gồm khoảng tháng, vùng, bang, danh mục và chỉ đơn hợp lệ. Giá trị lọc đi qua tham số ràng buộc, tên cột lấy từ danh sách cố định. Tab SQL chỉ nhận một câu `SELECT` hoặc `WITH`, chạy trong giao dịch `READ ONLY`, tối đa 5.000 dòng và 15 giây.
 
-## 5. Trang DSS và liên kết với P3
+## 5. Trang DSS
 
 Trang DSS hiện tính từ phân phối thời gian giao thực tế trong kho (`src/olap/dss_baseline.py`), chưa dùng ML:
 
@@ -79,4 +79,4 @@ Trang DSS hiện tính từ phân phối thời gian giao thực tế trong kho 
 - Độ nhạy: xem gợi ý thay đổi ra sao khi mục tiêu nằm trong khoảng 1% đến 20%.
 - Hạn chế: giữ nguyên phân phối quá khứ; chưa mô hình hóa việc hẹn dài làm khách bỏ đơn; nhóm đơn hàng dưới 30 đơn thì không gợi ý.
 
-Khi P3 có mô hình, có thể dùng dự đoán theo từng đơn thay cho `delivery_days` trong `dss_baseline.py`, và ghi số liệu vào `reports/metrics`, `reports/figures` để trang Mô hình ML hiển thị.
+Mô hình dự đoán rủi ro trễ từng đơn và what-if theo mô hình của P3 chạy bằng dòng lệnh, không nằm trên trang này (xem `docs/dss_design.md`).
