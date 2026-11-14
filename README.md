@@ -17,7 +17,7 @@ CSV (data/raw) ──ETL──▶ PostgreSQL ──▶ OLAP views ──▶ Dash
 | Thành phần | Công nghệ |
 |---|---|
 | Kho dữ liệu | PostgreSQL (Docker local) |
-| ETL | Python (pandas, SQLAlchemy) |
+| ETL | SQL (PostgreSQL) + Python (SQLAlchemy, psycopg2) |
 | OLAP | SQL (ROLLUP, CUBE, materialized view) |
 | ML | scikit-learn, LightGBM |
 | Dashboard / DSS | Streamlit, Plotly |
@@ -33,13 +33,14 @@ data-warehouse-ecommerce/
 ├── Makefile                         # Lệnh tắt: db, init, etl, train, score, app, test
 │
 ├── configs/
-│   ├── etl.yaml                     # Tên file nguồn, khung tọa độ Brazil, giai đoạn phân tích
+│   ├── etl.yaml                     # Tên file nguồn và file tham chiếu, khung tọa độ Brazil
 │   └── ml.yaml                      # Mốc chia train/test theo thời gian, danh sách mô hình
 │
 ├── data/
 │   ├── README.md                    # Nguồn, cách tải, mô tả các file
 │   ├── raw/                         # 9 file CSV gốc từ Kaggle (không commit)
-│   └── sample/                      # Bộ mẫu ~1.500 đơn, giữ đúng quan hệ khóa (có commit)
+│   ├── sample/                      # Bộ mẫu ~1.500 đơn, giữ đúng quan hệ khóa (có commit)
+│   └── reference/                   # Dữ liệu tham chiếu nhóm bổ sung: 27 bang, ngày lễ Brazil (có commit)
 │
 ├── src/
 │   ├── profiling/                   # Khảo sát dữ liệu nguồn (step1_..., step2_...)
@@ -59,7 +60,7 @@ data-warehouse-ecommerce/
 │   │
 │   ├── etl/                         # CSV → staging → dw
 │   │   ├── extract.py
-│   │   ├── transform/               # Làm sạch geolocation, tên thành phố, review, đơn hàng, danh mục
+│   │   ├── sql/                     # Biến đổi staging → dw (R01–R36): 0x ép kiểu, 1x dimension, 2x fact, 3x kiểm tra chất lượng
 │   │   ├── load_dimensions.py
 │   │   ├── load_facts.py
 │   │   ├── quality_checks.py

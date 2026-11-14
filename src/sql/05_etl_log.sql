@@ -1,4 +1,4 @@
--- Bảng etl_log.run_history và etl_log.error_queue.
+-- Bảng etl_log.run_history, etl_log.error_queue và etl_log.quality_check.
 
 CREATE TABLE IF NOT EXISTS etl_log.run_history (
     run_id                          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -19,4 +19,15 @@ CREATE TABLE IF NOT EXISTS etl_log.error_queue (
     raw_value                       TEXT,
     reason                          TEXT,
     created_at                      TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS etl_log.quality_check (
+    check_id                        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    run_id                          INTEGER NOT NULL REFERENCES etl_log.run_history(run_id),
+    category                        TEXT NOT NULL,
+    check_name                      TEXT NOT NULL,
+    expected                        NUMERIC,
+    actual                          NUMERIC,
+    passed                          BOOLEAN GENERATED ALWAYS AS (expected IS NOT DISTINCT FROM actual) STORED,
+    checked_at                      TIMESTAMP NOT NULL DEFAULT now()
 );
