@@ -15,6 +15,13 @@ if str(ROOT_DIR) not in sys.path:
 
 st.set_page_config(page_title="E-commerce DW & DSS", layout="wide")
 st.logo(str(ROOT_DIR / "src" / "app" / "assets" / "logo.svg"), size="large")
+# Tiêu đề nhóm trong menu: chữ in hoa, đậm, màu chủ đạo
+st.html("""<style>
+[data-testid="stNavSectionHeader"] {
+    color: #2563EB; font-weight: 700; font-size: 0.78rem;
+    text-transform: uppercase; letter-spacing: 0.06em; margin-top: 0.75rem;
+}
+</style>""")
 
 pages = {
     "Phân tích dữ liệu": [
