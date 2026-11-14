@@ -13,9 +13,9 @@ from lightgbm import LGBMClassifier
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import brier_score_loss, classification_report
+from sklearn.metrics import classification_report
 from sklearn.metrics import roc_auc_score
-from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sqlalchemy import text
@@ -363,13 +363,10 @@ def predict_late(bundle, orders):
     data = prepare_orders(orders)
     x = bundle["encoder"].transform(data[FEATURES]).astype(np.float32)
     probability = bundle["model"].predict_proba(x)[:, 1]
-    if "calibrator" not in bundle:
-        raise ValueError("Artifact lacks calibration; retrain late_risk")
-    calibrated = bundle["calibrator"].predict_proba(probability[:, None])[:, 1]
     return pd.DataFrame(
         {
             "order_id": data.order_id.to_numpy(),
-            "p_late": calibrated,
+            "p_late": probability,
             "risk_score": probability,
             "threshold": bundle["threshold"],
             "predicted_label": (probability >= bundle["threshold"]).astype(
@@ -380,7 +377,7 @@ def predict_late(bundle, orders):
 
 
 def train(output_dir):
-    """Fit the selected fold 4 models and calibrate on held-out real orders."""
+    """Fit the selected fold 4 models on the full outer training split."""
     output = Path(output_dir)
     if output.exists() and any(output.iterdir()):
         raise FileExistsError(
@@ -404,33 +401,22 @@ def train(output_dir):
     )
     fold = 4
     train_idx, test_idx = folds[fold - 1]
-    fit_idx, cal_idx = train_test_split(
-        train_idx,
-        test_size=0.2,
-        stratify=y[train_idx],
-        random_state=SEED,
-    )
-    assert len(np.unique(np.r_[fit_idx, cal_idx, test_idx])) == len(data)
-    fit = data.iloc[fit_idx]
+    assert not np.intersect1d(train_idx, test_idx).size
+    fit = data.iloc[train_idx]
     train_features = seller_history(fit, fit, links)
-    calibration = seller_history(data.iloc[cal_idx], fit, links)
     test_features = seller_history(data.iloc[test_idx], fit, links)
     bundles = {}
     for method, names in (
         ("SMOTE", ["logistic_regression"]),
         ("SMOTENC", ["random_forest", "lightgbm"]),
     ):
-        encoder, x, labels = resample_train(train_features, y[fit_idx], method)
-        x_cal = encoder.transform(calibration[FEATURES]).astype(np.float32)
+        encoder, x, labels = resample_train(
+            train_features, y[train_idx], method
+        )
         for name in names:
             model = make_models(fold)[name]
             model.fit(x, labels)
-            scores = model.predict_proba(x_cal)[:, 1]
-            calibrator = LogisticRegression(C=1e6, random_state=SEED).fit(
-                scores[:, None], y[cal_idx]
-            )
             bundle = {
-                "calibrator": calibrator,
                 "model": model,
                 "encoder": encoder,
                 "method": method,
@@ -458,9 +444,6 @@ def train(output_dir):
                 f"AUC={roc_auc_score(y[test_idx], predicted.risk_score):.6f}",
                 flush=True,
             )
-            for field in ("risk_score", "p_late"):
-                brier = brier_score_loss(y[test_idx], predicted[field])
-                print(f"Brier ({field}) = {brier:.6f}")
             bundles[name] = bundle
     output.mkdir(parents=True, exist_ok=True)
     for name, bundle in bundles.items():
@@ -497,8 +480,6 @@ def train(output_dir):
             for key, idx in {
                 "train": train_idx,
                 "test": test_idx,
-                "fit": fit_idx,
-                "calibration": cal_idx,
             }.items()
         },
     }

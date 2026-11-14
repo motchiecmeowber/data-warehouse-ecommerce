@@ -136,7 +136,7 @@ def test_intervention_scenarios(tmp_path):
     assert (tmp_path / "tornado.png").stat().st_size > 0
 
 
-def test_calibrated_scoring_and_segments(tmp_path):
+def test_raw_scoring_and_segments(tmp_path):
     from sklearn.compose import ColumnTransformer
     from sklearn.preprocessing import OneHotEncoder
 
@@ -154,15 +154,11 @@ def test_calibrated_scoring_and_segments(tmp_path):
     x = encoder.fit_transform(data[FEATURES])
     model = DummyClassifier(strategy="prior").fit(x, [0, 0, 1, 1])
     bundle = dict(encoder=encoder, model=model, threshold=0.4)
-    with pytest.raises(ValueError, match="retrain"):
-        predict_late(bundle, data)
-    bundle["calibrator"] = DummyClassifier(strategy="prior").fit(
-        np.ones((4, 1)), [0, 0, 0, 1]
-    )
+    assert predict_late(bundle, data).p_late.eq(0.5).all()
     for name in MODEL_NAMES:
         joblib.dump(bundle, tmp_path / f"{name}.joblib")
     scored = score_orders(tmp_path, data, segments, {"A": 2})
-    assert len(scored) == 12 and scored.p_late.eq(0.25).all()
+    assert len(scored) == 12 and scored.p_late.eq(0.5).all()
     assert scored.factor.tolist() == [2, 2, 1, 1] * 3
     with pytest.raises(ValueError):
         score_orders(tmp_path, data, pd.concat([segments, segments]), {"A": 2})
