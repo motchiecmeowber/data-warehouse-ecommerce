@@ -82,7 +82,7 @@ def test_ml_whatif_page_runs_p3_models():
     at = run("7_What_if_ML.py")
     assert_clean(at)
     labels = {m.label for m in at.metric}
-    assert {"Số đơn", "Đơn bị cảnh báo trễ"} <= labels
+    assert {"Số đơn đang xét", "Đơn dự đoán bị trễ"} <= labels
     at.slider[0].set_value(10).run()
     assert_clean(at)
     at.segmented_control(key="whatif_model").set_value("random_forest").run()
