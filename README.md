@@ -152,7 +152,7 @@ Lưu ý trên macOS:
    python -m src.ml.late_risk --output-dir artifacts/models/late_risk/temporal_01
    python -m src.dss.whatif --help
    ```
-7. Mở dashboard (các trang Tổng quan, Logistics, Người bán, OLAP explorer, DSS chỉ cần xong bước 5):
+7. Mở dashboard (các trang Tổng quan, Logistics, Người bán, OLAP explorer, DSS ngày hẹn giao chỉ cần xong bước 5; Phân cụm khách hàng cần xong bước 4; DSS chọn đơn can thiệp (ML) cần thêm model đã train ở bước 6):
    ```bash
    streamlit run src/app/app.py
    ```

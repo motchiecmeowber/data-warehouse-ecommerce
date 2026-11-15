@@ -3,6 +3,7 @@
 import argparse
 import json
 from pathlib import Path
+from typing import cast
 
 import joblib
 import numpy as np
@@ -181,7 +182,7 @@ def load_orders(connection, decision_day=None):
     query = QUERY
     params = {}
     if decision_day is not None:
-        start = pd.Timestamp(decision_day).normalize()
+        start = cast(pd.Timestamp, pd.Timestamp(decision_day)).normalize()
         params = {"start": start, "end": start + pd.Timedelta(days=1)}
         query = query.replace(
             "WHERE f.is_late IS NOT NULL",

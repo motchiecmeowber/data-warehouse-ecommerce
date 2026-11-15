@@ -6,7 +6,7 @@ Chạy notebook thực nghiệm trước, sau đó triển khai trong repo dựa
 ## Phân cụm khách hàng
 
 Module: `src/ml/kmean.py`, hàm `run_kmeans(connection, start_year, end_year)`.
-Trên dashboard, mở trang Mô hình ML, nhập năm bắt đầu/kết thúc rồi bấm phân cụm.
+Trên dashboard, mở trang Phân cụm khách hàng, nhập năm bắt đầu/kết thúc ở thanh bên rồi bấm phân cụm.
 Ví dụ 2017–2018 lấy ngày mua từ 01/01/2017 đến hết 31/12/2018.
 Đọc toàn bộ dữ liệu DW trong khoảng này, không lấy mẫu hoặc giới hạn số dòng.
 Cần nạp bộ đầy đủ từ `data/raw/` vào DW trước khi chạy.

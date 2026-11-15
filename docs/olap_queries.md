@@ -60,7 +60,7 @@ Mỗi file chạy được bằng `psql -f` hoặc trong tab Truy vấn SQL củ
 | Logistics | Tỷ lệ trễ và thời gian giao theo tháng, bang, tuyến (heatmap người bán × khách), thời gian từng chặng, điểm đánh giá khi giao trễ | `mv_delivery_cube`, `v_fulfillment` |
 | Người bán | Scorecard, top doanh thu, tỷ lệ trễ so với điểm đánh giá, mức tập trung doanh thu | `mv_seller_scorecard` |
 | OLAP explorer | Chọn số đo và phân cấp (roll-up, drill-down bằng cách đổi mức chi tiết), slice, dice bằng bộ lọc, pivot, ROLLUP, tải CSV, xem SQL sinh ra; tab SQL chỉ đọc | `mv_sales_cube` |
-| Phân cụm khách hàng | Phân cụm khách hàng bằng K-Means theo RFM (P3) | `dw` |
+| Phân cụm khách hàng | Phân khách thành 4 nhóm bằng K-Means theo RFM (P3) trong khoảng năm chọn ở thanh bên; số khách theo nhóm, trung vị RFM từng nhóm, danh sách khách, tải CSV | `dw` |
 | DSS ngày hẹn giao | Gợi ý số ngày hẹn theo tuyến × danh mục, what-if, độ nhạy, tuyến cần xem lại | `v_fulfillment`, `v_review` |
 | DSS chọn đơn can thiệp (ML) | Chấm xác suất trễ các đơn mua trong một ngày bằng 3 mô hình của P3, chọn đơn có lợi ích ròng dương trong giới hạn năng lực, what-if theo chi phí × hiệu quả, độ nhạy ±20%, tuyến và người bán rủi ro, đối chiếu thực tế | `dw`, `artifacts/models/late_risk/<run>` |
 
@@ -86,10 +86,10 @@ Trang này tính từ phân phối thời gian giao thực tế trong kho (`src/
 
 Trang này ra quyết định theo từng đơn, dùng mô hình rủi ro trễ và K-Means của P3 (cách tính: `docs/dss_design.md`). Trang chỉ gọi hàm của P3 và hiển thị:
 
-- Đầu vào: lần huấn luyện (`artifacts/models/late_risk/<run>`, tạo bằng `python -m src.ml.late_risk --output-dir artifacts/models/late_risk/temporal_01`), ngày mua của các đơn cần xét, thiệt hại cơ sở, chi phí, hiệu quả và số đơn xử lý được trong ngày, hệ số thiệt hại theo nhóm khách.
-- Dữ liệu: `load_orders(conn, decision_day=...)` đọc đơn trong ngày từ DW, `seller_history` thêm lịch sử người bán từ `seller_history.joblib`. Nhóm khách lấy từ `run_kmeans` trên các đơn từ 2016 đến hết năm trước ngày quyết định (lưu ở `artifacts/kmeans/`), để không dùng dữ liệu tương lai.
-- Tính toán: `score_orders` chấm xác suất trễ một lần cho mỗi mô hình. `run_whatif` chạy kịch bản đang chọn cùng lưới chi phí (×0,5; ×1,5; ×2) × hiệu quả (10% đến 100%), kèm độ nhạy ±20%.
-- Kết quả: KPI của kịch bản đang chọn, danh sách đơn nên can thiệp (tải CSV), bảng nhiệt what-if, biểu đồ độ nhạy, so sánh 3 mô hình, 10 tuyến và 10 người bán có nhiều đơn dự kiến trễ nhất.
-- Đối chiếu: với các đơn thuộc tập kiểm tra của mô hình, so sánh tỷ lệ trễ thực tế giữa đơn được chọn và không được chọn. Phần giả định có điểm đánh giá trung bình khi trễ và khi đúng hạn (`REVIEW_QUERY`) làm căn cứ cho thiệt hại.
+- Đầu vào: lần huấn luyện (`artifacts/models/late_risk/<run>`, phiên bản 2, tạo bằng `python -m src.ml.late_risk --output-dir artifacts/models/late_risk/temporal_01`), ngày mua của các đơn cần xét (chỉ từ mốc `available_at` của mô hình, hiện là 01/05/2018), thiệt hại cơ sở, chi phí, hiệu quả và số đơn xử lý được trong ngày, hệ số thiệt hại theo nhóm khách.
+- Dữ liệu: `load_orders(conn, decision_day=...)` đọc đơn trong ngày từ DW, `seller_history` thêm lịch sử người bán từ `seller_history.joblib`. Nhóm khách là snapshot `run_kmeans(..., as_of=ngày đầu tháng đang xét)`, đọc lại bằng `load_snapshot` (CSV + JSON metadata ở `artifacts/kmeans/`), chỉ dùng đơn đã giao trước mốc đó để không dùng dữ liệu tương lai.
+- Tính toán: `score_orders` chấm xác suất trễ đã hiệu chỉnh một lần cho mỗi mô hình (từ chối mô hình cũ, snapshot từ tương lai hoặc đơn trùng train/calibration). `run_whatif` chạy kịch bản đang chọn cùng lưới chi phí (×0,5; ×1,5; ×2) × hiệu quả (10% đến 100%), kèm độ nhạy ±20%.
+- Kết quả: KPI của kịch bản đang chọn, danh sách đơn nên can thiệp (tải CSV), bảng nhiệt what-if, biểu đồ độ nhạy, so sánh 3 mô hình, ảnh hưởng của hệ số nhóm khách (`segment_coverage`, `segment_ablation`), 10 tuyến và 10 người bán có nhiều đơn dự kiến trễ nhất.
+- Đối chiếu: với các đơn thuộc tập kiểm tra của mô hình, so sánh tỷ lệ trễ thực tế giữa đơn được chọn và không được chọn, số trễ dự kiến với thực tế, và bảng chỉ số đánh giá P3 ghi trong `metrics.csv` (ROC-AUC, average precision, Brier, precision/recall/F1). Phần giả định có điểm đánh giá trung bình khi trễ và khi đúng hạn (`REVIEW_QUERY`) làm căn cứ cho thiệt hại.
 
 Chưa có code hoặc model của P3 thì trang chỉ hiện hướng dẫn.
