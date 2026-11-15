@@ -7,7 +7,6 @@ import pandas as pd
 import streamlit as st
 from sqlalchemy.exc import SQLAlchemyError
 
-from src.app.components import charts
 from src.app.components.filters import fmt_money, fmt_pct
 from src.app.components.kpi import inject_css, kpi, panel
 from src.common.db import get_engine
@@ -30,11 +29,11 @@ with panel("intro"):
     c3.markdown(":material/link: **Dùng ở đâu**\n\nTrang *DSS chọn đơn can thiệp (ML)* nhân thiệt hại khi trễ theo nhóm khách.")
 
 # --- Đầu vào: chỉ chạy khi bấm nút vì K-Means trên toàn bộ khách mất vài giây
-with st.sidebar.form("customer_clustering"):
-    st.header("Khoảng dữ liệu")
-    start_year = st.number_input("Từ năm", min_value=1, max_value=9998, value=2017, step=1)
-    end_year = st.number_input("Đến năm", min_value=1, max_value=9998, value=2018, step=1)
-    submitted = st.form_submit_button("Phân cụm khách hàng", icon=":material/groups:", width="stretch")
+# Không dùng st.form: dòng gợi ý "Press Enter to submit form" bị đè lên ô số trong thanh bên hẹp
+st.sidebar.header("Khoảng dữ liệu")
+start_year = st.sidebar.number_input("Từ năm", min_value=1, max_value=9998, value=2017, step=1)
+end_year = st.sidebar.number_input("Đến năm", min_value=1, max_value=9998, value=2018, step=1)
+submitted = st.sidebar.button("Phân cụm khách hàng", icon=":material/groups:", type="primary", width="stretch")
 
 if submitted:
     st.session_state.pop("customer_segments", None)
@@ -58,6 +57,8 @@ if submitted:
 if "customer_segments" not in st.session_state:
     st.info("Chọn khoảng năm ở thanh bên rồi bấm **Phân cụm khách hàng**.", icon=":material/info:")
     st.stop()
+
+from src.app.components import charts  # nạp muộn: Altair nặng, lần mở trang đầu chưa cần
 
 trained_start, trained_end, result = st.session_state["customer_segments"]
 st.subheader(f"Kết quả {trained_start}–{trained_end}")
