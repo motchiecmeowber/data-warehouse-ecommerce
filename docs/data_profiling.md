@@ -139,7 +139,7 @@ Bản ghi cha không có bản ghi con:
 
 - Lọc giai đoạn 01/2017 – 08/2018 khi phân tích và train mô hình; vẫn nạp toàn bộ vào DW.
 - Tỷ lệ trễ thay đổi mạnh theo tháng và theo bang → cần `dim_date` (tháng, ngày lễ, Black Friday) và `dim_geography` (bang, vùng) cho phân tích giao hàng.
-- Khách gần như không mua lặp → không phân khúc khách theo RFM.
+- Khách gần như không mua lặp → tần suất mua (F) gần như không phân biệt khách: 96,9% khách có F = 1. Phân khúc theo RFM vẫn làm được nhưng chủ yếu dựa vào R và M; khi diễn giải các cụm cần lưu ý điểm này.
 
 ## Tổng hợp vấn đề
 

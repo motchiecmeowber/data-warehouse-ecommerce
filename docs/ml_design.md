@@ -44,7 +44,7 @@ avg_order_value, kmeans_cluster và kmeans_segment.
 
 ## Dự đoán giao trễ tại thời điểm đặt hàng
 
-Module `src/ml/late_risk.py`; chạy `python -m src.ml.late_risk --output-dir artifacts/models/late_risk/run_02`.
+Module `src/ml/late_risk.py`; chạy `python -m src.ml.late_risk --output-dir artifacts/models/late_risk/temporal_01`.
 Cần DATABASE_URL, staging và DW đã ETL. `fit_models(data, links, output_dir)` là pipeline dùng chung với script báo cáo.
 
 `configs/ml.yaml` quy định ba khoảng nửa mở: train [2017-01-01, 2018-02-01),

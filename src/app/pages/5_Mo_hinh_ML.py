@@ -27,8 +27,7 @@ with panel("intro"):
     c2.markdown(":material/flag: **Mục đích**\n\nBiết khách thuộc nhóm nào để ưu tiên giữ chân và chăm sóc phù hợp.")
     c3.markdown(":material/link: **Dùng ở đâu**\n\nTrang *DSS chọn đơn can thiệp (ML)* nhân thiệt hại khi trễ theo nhóm khách.")
 
-# --- Đầu vào: chỉ chạy K-Means khi bấm nút. Dùng form để đổi năm không chạy lại trang;
-# ẩn dòng gợi ý "Press Enter" vì nó đè lên ô số trong thanh bên hẹp.
+# --- Đầu vào: chỉ chạy K-Means khi bấm nút.
 st.html('<style>[data-testid="stSidebar"] [data-testid="InputInstructions"] { display: none; }</style>')
 st.sidebar.header("Khoảng dữ liệu")
 with st.sidebar.form("customer_clustering", border=False):

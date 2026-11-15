@@ -12,6 +12,7 @@ data/raw/*
 # Mọi file CSV/zip đều không commit, trừ dữ liệu mẫu và số liệu cho báo cáo
 *.csv
 *.zip
+!data/sample/*.csv
 !data/reference/*.csv
 !reports/metrics/*.csv
 
@@ -22,6 +23,9 @@ artifacts/models/*
 !artifacts/models/.gitkeep
 *.pkl
 *.joblib
+
+# Kết quả chạy K-Means và DSS từ dòng lệnh
+output/
 
 # Notebook / IDE
 .ipynb_checkpoints/
