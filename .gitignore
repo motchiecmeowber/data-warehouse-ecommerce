@@ -29,3 +29,7 @@ late_risk_results/
 .vscode/
 .idea/
 .DS_Store
+
+# Streamlit skills (tạo bởi `streamlit skills`)
+.agents/
+.claude/

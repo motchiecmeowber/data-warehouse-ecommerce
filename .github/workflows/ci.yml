@@ -1,0 +1,131 @@
+# Kiểm tra tự động cho mỗi pull request vào main và mỗi lần push lên main.
+#
+#   etl ──┬──▶ olap   (view OLAP, dashboard)
+#         └──▶ ml     (mô hình học máy và DSS; không phụ thuộc OLAP)
+#
+# Job etl dựng kho từ bộ dữ liệu mẫu (gồm 19 phép kiểm tra chất lượng) rồi xuất database thành
+# artifact. Job olap và ml chỉ chạy khi etl đạt, khôi phục đúng database đó thay vì chạy lại ETL.
+# Mỗi job chỉ chạy những file test có trong nhánh; nhánh chưa có test của phần nào thì bước đó bỏ qua.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# PR đẩy thêm commit thì hủy lần chạy cũ của chính PR đó
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Biến môi trường có sẵn thì python-dotenv không ghi đè, nên không cần file .env
+  DATABASE_URL: postgresql+psycopg2://dw:dw@localhost:5432/ecommerce_dw
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  etl:
+    name: ETL và kho dữ liệu
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: dw, POSTGRES_PASSWORD: dw, POSTGRES_DB: ecommerce_dw }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U dw -d ecommerce_dw"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}", cache: pip }
+      - name: Cài thư viện
+        run: pip install -r requirements.txt
+
+      - name: Tạo schema và bảng
+        run: python -m src.sql.init_db
+
+      - name: Chạy ETL trên bộ dữ liệu mẫu
+        # Trả mã lỗi 1 nếu có phép kiểm tra chất lượng không đạt
+        run: python -m src.etl.run_etl --data-dir data/sample
+
+      - name: Test ETL
+        run: bash .github/scripts/run_tests.sh tests/test_quality_checks.py tests/test_etl*.py
+
+      - name: Xuất database đã nạp
+        run: |
+          docker exec ${{ job.services.postgres.id }} \
+            pg_dump -U dw -d ecommerce_dw --format=custom --no-owner > warehouse.dump
+          ls -lh warehouse.dump
+      - uses: actions/upload-artifact@v4
+        with: { name: warehouse-dump, path: warehouse.dump, retention-days: 1 }
+
+  olap:
+    name: OLAP và dashboard
+    needs: etl
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: dw, POSTGRES_PASSWORD: dw, POSTGRES_DB: ecommerce_dw }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U dw -d ecommerce_dw"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}", cache: pip }
+      - name: Cài thư viện
+        run: pip install -r requirements.txt
+
+      - uses: actions/download-artifact@v4
+        with: { name: warehouse-dump }
+      - name: Khôi phục database
+        run: |
+          docker exec -i ${{ job.services.postgres.id }} \
+            pg_restore -U dw -d ecommerce_dw --no-owner --exit-on-error < warehouse.dump
+
+      - name: Tạo view OLAP
+        run: |
+          if [ -f src/olap/build.py ]; then
+            python -m src.olap.build
+          else
+            echo "Chưa có src/olap/build.py, bỏ qua"
+          fi
+
+      - name: Test OLAP và dashboard
+        run: bash .github/scripts/run_tests.sh tests/test_olap.py tests/test_charts.py tests/test_app_pages.py
+
+  ml:
+    name: Mô hình học máy và DSS
+    needs: etl
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: dw, POSTGRES_PASSWORD: dw, POSTGRES_DB: ecommerce_dw }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U dw -d ecommerce_dw"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}", cache: pip }
+      - name: Cài thư viện
+        run: pip install -r requirements.txt
+
+      - uses: actions/download-artifact@v4
+        with: { name: warehouse-dump }
+      - name: Khôi phục database
+        run: |
+          docker exec -i ${{ job.services.postgres.id }} \
+            pg_restore -U dw -d ecommerce_dw --no-owner --exit-on-error < warehouse.dump
+
+      - name: Test mô hình học máy và DSS
+        run: bash .github/scripts/run_tests.sh tests/test_kmean.py tests/test_late_risk.py tests/test_features_no_leakage.py
