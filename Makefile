@@ -14,7 +14,7 @@ olap:
 	python -m src.olap.build
 
 train:
-	python -m src.ml.late_risk --output-dir artifacts/models/late_risk/run_02
+	python -m src.ml.late_risk --output-dir artifacts/models/late_risk/temporal_01
 
 score:
 	python -m src.dss.whatif --help

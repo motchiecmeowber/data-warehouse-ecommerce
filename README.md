@@ -8,10 +8,9 @@ Xây dựng kho dữ liệu cho dữ liệu thương mại điện tử (Brazili
 
 ```
 CSV (data/raw) ──ETL──▶ PostgreSQL ──▶ OLAP views ──▶ Dashboard (Streamlit)
-                         │  staging                      ▲
-                         │  dw (star schema)             │
-                         │  ml (feature, prediction) ◀── ML ──▶ DSS (what-if, gợi ý)
-                         └  etl_log
+                         │  staging                     ▲
+                         │  dw (star schema) ──▶ ML ──▶ DSS (what-if, chọn đơn)
+                         └  etl_log              └─▶ artifacts/models (model đã train)
 ```
 
 | Thành phần | Công nghệ |
@@ -55,7 +54,6 @@ data-warehouse-ecommerce/
 │   │   ├── 01_staging.sql
 │   │   ├── 02_dimensions.sql
 │   │   ├── 03_facts.sql
-│   │   ├── 04_ml_tables.sql
 │   │   ├── 05_etl_log.sql
 │   │   └── init_db.py
 │   │
@@ -73,8 +71,7 @@ data-warehouse-ecommerce/
 │   │
 │   ├── ml/                          # Lớp dự đoán
 │   │   ├── late_risk.py             # Chia thời gian, fit/calibrate, predict và metrics
-│   │   ├── kmean.py                 # RFM/K-Means và snapshot as_of cho DSS
-│   │   └── features/               # Các module đặc trưng
+│   │   └── kmean.py                 # RFM/K-Means và snapshot as_of cho DSS
 │   │
 │   ├── dss/
 │   │   └── whatif.py                # Chấm điểm, chọn đơn, what-if, độ nhạy, đối chứng
@@ -85,7 +82,7 @@ data-warehouse-ecommerce/
 │       └── pages/                   # Tổng quan, Logistics, Người bán, OLAP, Phân cụm khách hàng, 2 trang DSS
 │
 ├── artifacts/models/                # Model đã train (không commit)
-├── tests/                           # Kiểm thử ETL và chống leakage
+├── tests/                           # Kiểm thử quality check ETL, OLAP, dashboard, ML, K-Means
 ├── reports/
 │   ├── figures/                     # Biểu đồ cho báo cáo
 │   └── metrics/                     # Số liệu đánh giá mô hình
@@ -152,7 +149,7 @@ Lưu ý trên macOS:
    ```
 6. Train và chấm điểm mô hình:
    ```bash
-   python -m src.ml.late_risk --output-dir artifacts/models/late_risk/run_01
+   python -m src.ml.late_risk --output-dir artifacts/models/late_risk/temporal_01
    python -m src.dss.whatif --help
    ```
 7. Mở dashboard (các trang Tổng quan, Logistics, Người bán, OLAP explorer, DSS chỉ cần xong bước 5):
