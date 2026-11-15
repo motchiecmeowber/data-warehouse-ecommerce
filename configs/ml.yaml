@@ -1,9 +1,11 @@
 # Cấu hình ML (C)
 split:                      # chia theo thời gian, KHÔNG chia ngẫu nhiên
   train_start: "2017-01-01"
-  train_end: "2018-04-30"
+  train_end: "2018-02-01"    # mọi mốc end là exclusive
+  calibration_start: "2018-02-01"
+  calibration_end: "2018-05-01"
   test_start: "2018-05-01"
-  test_end: "2018-08-31"
+  test_end: "2018-09-01"
 
 target: is_late             # ngày giao thực tế > ngày hẹn giao
 

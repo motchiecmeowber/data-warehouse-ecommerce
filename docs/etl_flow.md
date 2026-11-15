@@ -6,7 +6,6 @@ Chạy toàn bộ bằng một lệnh (ở thư mục gốc repo):
 
 ```bash
 python -m src.etl.run_etl                        # dữ liệu đầy đủ (data/raw)
-python -m src.etl.run_etl --data-dir data/sample # bộ mẫu
 ```
 
 Yêu cầu: database đã bật (`docker compose up -d`) và đã tạo bảng (`python -m src.sql.init_db`).

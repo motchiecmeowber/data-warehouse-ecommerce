@@ -41,7 +41,6 @@ data-warehouse-ecommerce/
 ├── data/
 │   ├── README.md                    # Nguồn, cách tải, mô tả các file
 │   ├── raw/                         # 9 file CSV gốc từ Kaggle (không commit)
-│   ├── sample/                      # Bộ mẫu ~1.500 đơn, giữ đúng quan hệ khóa (có commit)
 │   └── reference/                   # Dữ liệu tham chiếu nhóm bổ sung: 27 bang, ngày lễ Brazil (có commit)
 │
 ├── src/
@@ -66,7 +65,6 @@ data-warehouse-ecommerce/
 │   │   ├── load_dimensions.py
 │   │   ├── load_facts.py
 │   │   ├── quality_checks.py
-│   │   ├── make_sample.py           # Tạo data/sample từ data/raw
 │   │   └── run_etl.py
 │   │
 │   ├── olap/
@@ -74,18 +72,12 @@ data-warehouse-ecommerce/
 │   │   └── queries/                 # ROLLUP, CUBE, drill-down, slice/dice
 │   │
 │   ├── ml/                          # Lớp dự đoán
-│   │   ├── datasets.py              # Lấy dữ liệu từ dw, chia train/test theo thời gian
-│   │   ├── features/                # Feature cấp đơn hàng và người bán (chống leakage)
-│   │   ├── models/                  # Rủi ro giao trễ, thời gian giao, phân cụm tuyến
-│   │   ├── train.py
-│   │   ├── evaluate.py
-│   │   └── predict.py
+│   │   ├── late_risk.py             # Chia thời gian, fit/calibrate, predict và metrics
+│   │   ├── kmean.py                 # RFM/K-Means và snapshot as_of cho DSS
+│   │   └── features/               # Các module đặc trưng
 │   │
-│   ├── dss/                         # Lớp ra quyết định
-│   │   ├── decision_model.py
-│   │   ├── whatif.py
-│   │   ├── sensitivity.py
-│   │   └── recommend.py
+│   ├── dss/
+│   │   └── whatif.py                # Chấm điểm, chọn đơn, what-if, độ nhạy, đối chứng
 │   │
 │   └── app/                         # Dashboard + giao diện DSS (Streamlit)
 │       ├── app.py
@@ -160,13 +152,23 @@ Lưu ý trên macOS:
    ```
 6. Train và chấm điểm mô hình:
    ```bash
-   python -m src.ml.train
-   python -m src.ml.predict
+   python -m src.ml.late_risk --output-dir artifacts/models/late_risk/run_01
+   python -m src.dss.whatif --help
    ```
 7. Mở dashboard (các trang Tổng quan, Logistics, Người bán, OLAP explorer, DSS chỉ cần xong bước 5):
    ```bash
    streamlit run src/app/app.py
    ```
+
+DSS xếp hạng đơn theo lợi ích can thiệp kỳ vọng, dùng xác suất đã hiệu chỉnh của model,
+nhóm khách K-Means và năng lực xử lý trong ngày. Xem [hướng dẫn train và chạy
+kịch bản](docs/dss_design.md).
+
+Pipeline DSS chia train/calibration/test theo thời gian trong `configs/ml.yaml`; model và snapshot cũ phải tạo lại. Notebook bên dưới là thực nghiệm tái lập paper riêng, không phải pipeline cung cấp xác suất cho DSS.
+
+## Notebook đánh giá giao trễ
+
+[late_risk_paper_pipeline.ipynb](notebooks/late_risk_paper_pipeline.ipynb): tải riêng lên Colab/Kaggle/Jupyter, bật Internet và chọn **Run All**. Notebook tự tải Olist, tiền xử lý bằng pandas và chạy Logistic Regression / Random Forest / LightGBM qua 5 fold. So sánh Manual train 2:1 với SMOTE train 10.000+10.000 trên cùng test 50:50 gồm đơn thật, giữ config model đã chọn; Manual dùng ngưỡng 0,5, SMOTE dùng ngưỡng validation lưu theo fold. Có thêm bảng đối chiếu cả hai cùng ngưỡng 0,5. Không cần PostgreSQL. Bảng điểm, dự đoán và confusion matrix lưu trong `late_risk_results/balance_comparison/`. Các giả định và giới hạn so với paper được ghi trong notebook.
 
 ## Phân công
 
