@@ -80,13 +80,23 @@ def test_ml_intervention_page_runs_p3_models():
     from src.dss import whatif
     if not hasattr(whatif, "score_orders"):
         pytest.skip("Chưa có code P3")
+    import json
+
     from src.common.config import ARTIFACTS_DIR
-    if not list((ARTIFACTS_DIR / "models" / "late_risk").glob("*/seller_history.joblib")):
-        pytest.skip("Chưa train model P3")
+    from src.ml.late_risk import BUNDLE_VERSION
+    runs = [p.parent for p in (ARTIFACTS_DIR / "models" / "late_risk").glob("*/seller_history.joblib")
+            if json.loads((p.parent / "manifest.json").read_text()).get("format_version") == BUNDLE_VERSION]
+    if not runs:
+        pytest.skip("Chưa train model P3 (phiên bản hiện tại)")
     at = AppTest.from_file(str(PAGES / "7_DSS_can_thiep_ML.py"), default_timeout=600).run()
     assert_clean(at)
     picked = _metric(at, "Đơn nên can thiệp")
     assert 0 < picked <= 20                                     # năng lực mặc định 20 đơn/ngày
+    assert any(m.label == "Đơn có nhóm khách" for m in at.metric)   # có phần ảnh hưởng của K-Means
+    at.toggle(key="dss_use_segments").set_value(False).run()    # bỏ nhóm khách: mọi hệ số bằng 1
+    assert_clean(at)
+    assert not any(m.label == "Đơn có nhóm khách" for m in at.metric)
+    at.toggle(key="dss_use_segments").set_value(True).run()
     at.toggle(key="dss_unlimited").set_value(True).run()        # không giới hạn số đơn
     assert_clean(at)
     assert _metric(at, "Đơn nên can thiệp") >= picked
