@@ -454,9 +454,11 @@ def train(output_dir):
     for name, bundle in bundles.items():
         path = output / f"{name}.joblib"
         joblib.dump(bundle, path)
-        np.testing.assert_array_equal(
+        np.testing.assert_allclose(
             predict_late(bundle, test_features).p_late,
             predict_late(joblib.load(path), test_features).p_late,
+            rtol=1e-12,
+            atol=1e-14,
         )
     history_columns = [
         "order_id",

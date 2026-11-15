@@ -1,5 +1,7 @@
 """Focused checks for leakage, resampling, selection and what-if."""
 
+from unittest.mock import MagicMock
+
 import joblib
 import numpy as np
 import pandas as pd
@@ -7,6 +9,7 @@ import pytest
 from sklearn.dummy import DummyClassifier
 
 from src.dss.whatif import evaluate, plot_tornado, run_whatif, score_orders
+from src.ml import late_risk
 from src.ml.late_risk import (
     CATEGORICAL,
     FEATURES,
@@ -183,3 +186,67 @@ def test_warehouse_half_centiday_rounding(monkeypatch):
         19.2,
         19.2,
     ]
+
+
+@pytest.mark.parametrize(
+    "drift, fails",
+    [(np.spacing(0.5), False), (0.01, True)],
+    ids=["roundoff", "material-change"],
+)
+def test_train_model_roundtrip_tolerance(tmp_path, monkeypatch, drift, fails):
+    from sklearn.compose import ColumnTransformer
+    from sklearn.preprocessing import OneHotEncoder
+
+    data = orders(20)
+    for column in ["order_purchase_timestamp", "order_estimated_delivery_date"]:
+        data[column] = data[column].astype("datetime64[ns]")
+    data["is_late"] = np.arange(len(data)) % 2
+    data["delay_days"] = data.is_late
+    data["order_delivered_customer_date"] = (
+        data.order_estimated_delivery_date
+        + pd.to_timedelta(data.delay_days, unit="D")
+    )
+    links = data[["order_id"]].assign(seller_id="s")
+    monkeypatch.setattr(late_risk, "get_engine", MagicMock())
+    monkeypatch.setattr(late_risk, "load_orders", lambda connection: (data, links))
+    encoder = ColumnTransformer(
+        [
+            ("numeric", "passthrough", NUMERIC),
+            ("category", OneHotEncoder(handle_unknown="ignore"), CATEGORICAL),
+        ]
+    ).fit(data[FEATURES])
+    monkeypatch.setattr(
+        late_risk,
+        "resample_train",
+        lambda features, y, method: (
+            encoder, encoder.transform(features[FEATURES]), y
+        ),
+    )
+    monkeypatch.setattr(
+        late_risk,
+        "make_models",
+        lambda fold: {
+            name: DummyClassifier(strategy="prior") for name in MODEL_NAMES
+        },
+    )
+    original_load = joblib.load
+
+    def load_with_drift(path):
+        bundle = original_load(path)
+        if path.name == "random_forest.joblib":
+            bundle["model"].class_prior_[1] += drift
+        return bundle
+
+    monkeypatch.setattr(joblib, "load", load_with_drift)
+    output = tmp_path / "models"
+    if fails:
+        with pytest.raises(AssertionError):
+            late_risk.train(output)
+        assert not (output / "manifest.json").exists()
+    else:
+        manifest = late_risk.train(output)
+        expected = {f"{name}.joblib" for name in MODEL_NAMES} | {
+            "seller_history.joblib", "manifest.json", "example_orders.csv"
+        }
+        assert {path.name for path in output.iterdir()} == expected
+        assert set(manifest["models"]) == set(MODEL_NAMES)
