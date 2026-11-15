@@ -189,9 +189,10 @@ if use_segments:
     edited = st.sidebar.data_editor(
         pd.DataFrame({"segment": names, "factor": [DEFAULT_FACTORS.get(n, 1.0) for n in names]}),
         key=f"factors_{seg_as_of:%Y%m}", hide_index=True, disabled=["segment"], width="stretch",
-        column_config={"segment": "Nhóm khách",
-                       "factor": st.column_config.NumberColumn("Hệ số thiệt hại", min_value=0.0, step=0.1,
-                                                               format="%.1f", required=True)})
+        column_config={"segment": st.column_config.TextColumn("Nhóm khách", width=125),
+                       "factor": st.column_config.NumberColumn(
+                           "Hệ số", help="Hệ số thiệt hại: thiệt hại khi trễ = thiệt hại cơ sở × hệ số",
+                           min_value=0.0, step=0.1, format="%.1f", required=True, width=70)})
     factors = dict(zip(edited["segment"].astype(str), edited["factor"].astype(float)))
     st.sidebar.caption(f"Khách chưa có đơn giao trước {seg_as_of:%d/%m/%Y} thuộc nhóm “{UNKNOWN}”, hệ số 1.")
 
