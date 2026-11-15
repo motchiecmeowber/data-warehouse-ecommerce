@@ -11,10 +11,10 @@ etl:
 	python -m src.etl.run_etl
 
 train:
-	python -m src.ml.train
+	python -m src.ml.late_risk --output-dir artifacts/models/late_risk/run_02
 
 score:
-	python -m src.ml.predict
+	python -m src.dss.whatif --help
 
 app:
 	streamlit run src/app/app.py

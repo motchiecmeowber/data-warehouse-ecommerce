@@ -1,6 +1,8 @@
 """Đọc đơn đã giao từ DW, tính RFM và chia khách thành 4 nhóm bằng K-Means."""
 
 import argparse
+import hashlib
+import json
 import logging
 from datetime import date
 from pathlib import Path
@@ -33,19 +35,30 @@ QUERY = """
 """
 
 
-def load_orders(connection, start_year, end_year):
+def load_orders(connection, start_year, end_year, as_of=None):
     """Đọc toàn bộ đơn đã giao trong khoảng năm đã chọn."""
     if not 1 <= start_year <= end_year <= 9998:
         raise ValueError(
             "Năm phải thỏa 1 <= năm bắt đầu <= năm kết thúc <= 9998"
         )
+    query = QUERY
+    params = {"start_date": date(start_year, 1, 1),
+              "end_date": date(end_year + 1, 1, 1)}
+    if as_of is not None:
+        cutoff = pd.Timestamp(as_of)
+        if pd.isna(cutoff) or cutoff.tz is not None:
+            raise ValueError("Invalid snapshot as_of")
+        query += """
+          AND orders.order_purchase_timestamp < :as_of
+          AND EXISTS (SELECT 1 FROM staging.orders_typed t
+                      WHERE t.order_id = orders.order_id
+                        AND t.order_delivered_customer_date < :as_of)
+        """
+        params["as_of"] = cutoff.to_pydatetime()
     orders = pd.read_sql_query(
-        text(QUERY),
+        text(query),
         connection,
-        params={
-            "start_date": date(start_year, 1, 1),
-            "end_date": date(end_year + 1, 1, 1),
-        },
+        params=params,
     )
     return validate_orders(orders)
 
@@ -86,13 +99,17 @@ def validate_orders(orders):
     return orders
 
 
-def build_rfm(orders):
+def build_rfm(orders, as_of=None):
     """Tổng hợp Recency, Frequency, Monetary và giá trị đơn trung bình."""
     # Mốc tính recency = ngày mua cuối cùng trong dữ liệu + 1 ngày.
     reference_date = (
         orders["order_purchase_timestamp"].max().normalize()
         + pd.Timedelta(days=1)
     )
+    if as_of is not None:
+        reference_date = pd.Timestamp(as_of).normalize()
+        if orders.order_purchase_timestamp.ge(reference_date).any():
+            raise ValueError("Snapshot contains purchases at/after as_of")
 
     rfm = orders.groupby("customer_unique_id").agg(
         last_purchase=("order_purchase_timestamp", "max"),
@@ -167,13 +184,25 @@ def save_csv(rfm, output_path):
 
 def run_kmeans(
     connection, start_year, end_year,
-    output_path="output/kmeans/customer_segments.csv",
+    output_path="output/kmeans/customer_segments.csv", as_of=None,
 ):
     """Đọc DW, tính RFM, phân 4 cụm, gán tên và trả đường dẫn CSV."""
-    orders = load_orders(connection, start_year, end_year)
+    orders = (load_orders(connection, start_year, end_year) if as_of is None
+              else load_orders(connection, start_year, end_year, as_of=as_of))
     logger.info("Đã đọc %s đơn đã giao", len(orders))
 
-    rfm = build_rfm(orders)
+    rfm = cluster_orders(orders, as_of=as_of)
+    saved_path = save_csv(rfm, output_path)
+    if as_of is not None:
+        save_snapshot_metadata(saved_path, as_of, start_year, end_year)
+    else:
+        saved_path.with_suffix(".json").unlink(missing_ok=True)
+    logger.info("Đã lưu %s khách vào %s", len(rfm), saved_path)
+    return saved_path
+
+
+def cluster_orders(orders, as_of=None):
+    rfm = build_rfm(validate_orders(orders), as_of=as_of)
     scaled_features = scale_features(rfm)
 
     if len(np.unique(scaled_features, axis=0)) < 4:
@@ -189,10 +218,30 @@ def run_kmeans(
         rfm["kmeans_segment"].value_counts().to_string(),
     )
 
-    saved_path = save_csv(rfm, output_path)
-    logger.info("Đã lưu %s khách vào %s", len(rfm), saved_path)
+    return rfm
 
-    return saved_path
+
+def save_snapshot_metadata(path, as_of, start_year, end_year):
+    path = Path(path)
+    metadata = dict(as_of=str(pd.Timestamp(as_of)), start_year=start_year,
+                    end_year=end_year, format_version=1,
+                    csv_sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+    path.with_suffix(".json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    return metadata
+
+
+def load_snapshot(path):
+    path = Path(path)
+    try:
+        metadata = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise ValueError("K-Means snapshot metadata missing; regenerate with --as-of") from exc
+    if (metadata.get("format_version") != 1
+            or metadata.get("csv_sha256") != hashlib.sha256(path.read_bytes()).hexdigest()):
+        raise ValueError("K-Means snapshot metadata does not match CSV")
+    segments = pd.read_csv(path, dtype={"customer_unique_id": "string"})
+    segments.attrs["snapshot"] = metadata
+    return segments
 
 
 if __name__ == "__main__":
@@ -205,10 +254,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Phân 4 cụm khách theo RFM")
     parser.add_argument("--start-year", type=int, required=True)
     parser.add_argument("--end-year", type=int, required=True)
+    parser.add_argument("--as-of", help="Exclusive snapshot cutoff for historical DSS")
+    parser.add_argument("--output-path", default="output/kmeans/customer_segments.csv")
     args = parser.parse_args()
 
     engine = get_engine()
     try:
-        run_kmeans(engine, args.start_year, args.end_year)
+        run_kmeans(engine, args.start_year, args.end_year, args.output_path, as_of=args.as_of)
     finally:
         engine.dispose()

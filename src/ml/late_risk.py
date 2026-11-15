@@ -1,4 +1,4 @@
-"""Train three late-risk models on one validation-selected Olist fold."""
+"""Train and calibrate late-risk models on disjoint chronological windows."""
 
 import argparse
 import json
@@ -10,21 +10,25 @@ import pandas as pd
 from imblearn.over_sampling import SMOTE, SMOTENC
 from imblearn.under_sampling import RandomUnderSampler
 from lightgbm import LGBMClassifier
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.compose import ColumnTransformer
+from sklearn.frozen import FrozenEstimator
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report
-from sklearn.metrics import roc_auc_score
-from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import (average_precision_score, brier_score_loss,
+                             confusion_matrix, f1_score, log_loss,
+                             precision_recall_curve, precision_score,
+                             recall_score, roc_auc_score)
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sqlalchemy import text
 
 from src.common.db import get_engine
+from src.common.config import load_yaml
 
 SEED = 42
 MODEL_NAMES = ("logistic_regression", "random_forest", "lightgbm")
-LR_C = (1, 1, 10, 0.001, 0.1)
+BUNDLE_VERSION = 2
 
 HISTORY = [
     "delayed_orders_by_seller",
@@ -54,7 +58,7 @@ def seller_history(query, train, links):
     ].copy()
     events["known_at"] = events[
         ["order_delivered_customer_date", "order_estimated_delivery_date"]
-    ].max(axis=1)
+    ].max(axis=1).astype("datetime64[ns]")
     events = events.merge(links, on="order_id", validate="one_to_many")
     # Gộp đồng thời trước cumsum: mọi event tại cùng thời điểm cùng được biết.
     events = events.groupby(["seller_id", "known_at"], as_index=False).agg(
@@ -68,6 +72,7 @@ def seller_history(query, train, links):
     queries = query[["order_id", "order_purchase_timestamp"]].merge(
         links, on="order_id", validate="one_to_many"
     )
+    queries["order_purchase_timestamp"] = queries.order_purchase_timestamp.astype("datetime64[ns]")
     queries = queries.sort_values(["order_purchase_timestamp", "seller_id"])
     past = pd.merge_asof(
         queries,
@@ -272,7 +277,7 @@ def resample_train(features, y, method):
     return encoder, x, labels
 
 
-def make_models(fold):
+def make_models():
     scaler = ColumnTransformer(
         [
             ("numeric", StandardScaler(), list(range(len(NUMERIC)))),
@@ -283,7 +288,7 @@ def make_models(fold):
         "logistic_regression": make_pipeline(
             scaler,
             LogisticRegression(
-                C=LR_C[fold - 1],
+                C=0.001,
                 max_iter=2000,
                 random_state=SEED,
             ),
@@ -365,14 +370,17 @@ def prepare_orders(orders):
 
 
 def predict_late(bundle, orders):
+    if bundle.get("format_version") != BUNDLE_VERSION or "calibrator" not in bundle:
+        raise ValueError("Uncalibrated/legacy model bundle; retrain late_risk")
     data = prepare_orders(orders)
     x = bundle["encoder"].transform(data[FEATURES]).astype(np.float32)
-    probability = bundle["model"].predict_proba(x)[:, 1]
+    raw = bundle["model"].predict_proba(x)[:, 1]
+    probability = bundle["calibrator"].predict_proba(x)[:, 1]
     return pd.DataFrame(
         {
             "order_id": data.order_id.to_numpy(),
             "p_late": probability,
-            "risk_score": probability,
+            "risk_score": raw,
             "threshold": bundle["threshold"],
             "predicted_label": (probability >= bundle["threshold"]).astype(
                 int
@@ -381,124 +389,135 @@ def predict_late(bundle, orders):
     )
 
 
-def train(output_dir):
-    """Fit the selected fold 4 models on the full outer training split."""
+def temporal_splits(data, config):
+    """Exclude outcomes unavailable when each fitted artifact was created."""
+    if data.empty or data.order_id.isna().any() or not data.order_id.is_unique:
+        raise ValueError("Need nonempty labeled orders with unique IDs")
+    split = config["split"]
+    dates = {k: pd.Timestamp(v) for k, v in split.items()}
+    if not (dates["train_start"] < dates["train_end"]
+            == dates["calibration_start"] < dates["calibration_end"]
+            == dates["test_start"] < dates["test_end"]):
+        raise ValueError("Expected contiguous, increasing chronological windows")
+    purchase = pd.to_datetime(data.order_purchase_timestamp)
+    outcomes = data[["order_delivered_customer_date", "order_estimated_delivery_date"]]
+    known = outcomes.max(axis=1)
+    parts = {}
+    for name in ("train", "calibration", "test"):
+        mask = (purchase.ge(dates[f"{name}_start"])
+                & purchase.lt(dates[f"{name}_end"]) & outcomes.notna().all(axis=1))
+        if name != "test":
+            mask &= known.lt(dates[f"{name}_end"])
+        part = data.loc[mask].copy()
+        if set(part.is_late.unique()) != {0, 1}:
+            raise ValueError(f"{name} must contain both outcome classes")
+        parts[name] = part
+    return parts
+
+
+def best_threshold(truth, probability):
+    precision, recall, thresholds = precision_recall_curve(truth, probability)
+    f1 = np.divide(2 * precision[:-1] * recall[:-1],
+                   precision[:-1] + recall[:-1],
+                   out=np.zeros(len(thresholds)),
+                   where=(precision[:-1] + recall[:-1]) > 0)
+    return float(thresholds[np.flatnonzero(f1 == f1.max())[-1]])
+
+
+def fit_models(data, links, output_dir, config=None):
+    """Shared fit/evaluation path for DW CLI and report reproduction."""
+    config = load_yaml("ml.yaml") if config is None else config
+    if config["random_state"] != SEED or tuple(config["models"]) != MODEL_NAMES:
+        raise ValueError("This experiment requires seed 42 and the three configured models")
     output = Path(output_dir)
     if output.exists() and any(output.iterdir()):
-        raise FileExistsError(
-            "Use an empty output directory for this training run"
-        )
-    engine = get_engine()
-    try:
-        with engine.connect().execution_options(
-            isolation_level="REPEATABLE READ"
-        ) as connection:
-            data, links = load_orders(connection)
-    finally:
-        engine.dispose()
-    y = data.is_late.to_numpy(int)
-    folds = list(
-        StratifiedKFold(
-            n_splits=5,
-            shuffle=True,
-            random_state=SEED,
-        ).split(data, y)
-    )
-    fold = 4
-    train_idx, test_idx = folds[fold - 1]
-    assert not np.intersect1d(train_idx, test_idx).size
-    fit = data.iloc[train_idx]
-    train_features = seller_history(fit, fit, links)
-    test_features = seller_history(data.iloc[test_idx], fit, links)
-    bundles = {}
-    for method, names in (
-        ("SMOTE", ["logistic_regression"]),
-        ("SMOTENC", ["random_forest", "lightgbm"]),
-    ):
-        encoder, x, labels = resample_train(
-            train_features, y[train_idx], method
-        )
+        raise FileExistsError("Use an empty output directory for this training run")
+    parts = temporal_splits(data, config)
+    fit = parts["train"]
+    features = {name: seller_history(part, fit, links)
+                for name, part in parts.items()}
+    train_features = features["train"]
+    cal = prepare_orders(features["calibration"])
+    test = features["test"]
+    truth = test.is_late.to_numpy(int)
+    available_at = str(pd.Timestamp(config["split"]["calibration_end"]))
+    bundles, records, predictions = {}, [], []
+    for method, names in (("SMOTE", ["logistic_regression"]),
+                          ("SMOTENC", ["random_forest", "lightgbm"])):
+        encoder, x, labels = resample_train(train_features, fit.is_late.to_numpy(int), method)
+        x_cal = encoder.transform(cal[FEATURES]).astype(np.float32)
         for name in names:
-            model = make_models(fold)[name]
-            model.fit(x, labels)
-            bundle = {
-                "model": model,
-                "encoder": encoder,
-                "method": method,
-                "threshold": 0.4,
-                "fold": fold,
-                "seed": SEED,
-                "train_counts": [10_000, 10_000],
-            }
-            predicted = predict_late(bundle, test_features)
-            print(
-                f"\nTEST | {name} | {method} | "
-                f"threshold={bundle['threshold']:.6f}"
-            )
-            print(
-                classification_report(
-                    y[test_idx],
-                    predicted.predicted_label,
-                    labels=[0, 1],
-                    target_names=["On time", "Late"],
-                    digits=4,
-                    zero_division=0,
-                )
-            )
-            print(
-                f"AUC={roc_auc_score(y[test_idx], predicted.risk_score):.6f}",
-                flush=True,
-            )
+            model = make_models()[name].fit(x, labels)
+            calibrator = CalibratedClassifierCV(FrozenEstimator(model), method="sigmoid")
+            calibrator.fit(x_cal, parts["calibration"].is_late.to_numpy(int))
+            probability = calibrator.predict_proba(x_cal)[:, 1]
+            threshold = best_threshold(parts["calibration"].is_late, probability)
+            bundle = dict(model=model, encoder=encoder, calibrator=calibrator,
+                          format_version=BUNDLE_VERSION, available_at=available_at,
+                          method=method, threshold=threshold, seed=SEED,
+                          train_counts=[10_000, 10_000])
+            pred = predict_late(bundle, test)
+            tn, fp, fn, tp = confusion_matrix(truth, pred.predicted_label, labels=[0, 1]).ravel()
+            r = dict(model=name, method=method, threshold=threshold,
+                     test_n=len(test), test_late=int(truth.sum()),
+                     baseline_ap=float(truth.mean()),
+                     auc=roc_auc_score(truth, pred.p_late),
+                     raw_auc=roc_auc_score(truth, pred.risk_score),
+                     average_precision=average_precision_score(truth, pred.p_late),
+                     raw_average_precision=average_precision_score(truth, pred.risk_score),
+                     precision=precision_score(truth, pred.predicted_label, zero_division=0),
+                     recall=recall_score(truth, pred.predicted_label, zero_division=0),
+                     f1=f1_score(truth, pred.predicted_label, zero_division=0),
+                     brier=brier_score_loss(truth, pred.p_late),
+                     raw_brier=brier_score_loss(truth, pred.risk_score),
+                     log_loss=log_loss(truth, pred.p_late),
+                     raw_log_loss=log_loss(truth, pred.risk_score),
+                     tn=int(tn), fp=int(fp), fn=int(fn), tp=int(tp))
+            records.append(r)
+            predictions.append(pred.assign(model=name, truth=truth,
+                                order_purchase_timestamp=test.order_purchase_timestamp.to_numpy()))
             bundles[name] = bundle
+            print("TEST", r, flush=True)
     output.mkdir(parents=True, exist_ok=True)
     for name, bundle in bundles.items():
         path = output / f"{name}.joblib"
         joblib.dump(bundle, path)
-        np.testing.assert_allclose(
-            predict_late(bundle, test_features).p_late,
-            predict_late(joblib.load(path), test_features).p_late,
-            rtol=1e-12,
-            atol=1e-14,
-        )
-    history_columns = [
-        "order_id",
-        "order_delivered_customer_date",
-        "order_estimated_delivery_date",
-        "is_late",
-        "delay_days",
-    ]
-    joblib.dump(
-        {
-            "train": fit[history_columns],
-            "links": links.loc[links.order_id.isin(fit.order_id)],
-        },
-        output / "seller_history.joblib",
-    )
-    manifest = {
-        "fold": fold,
-        "seed": SEED,
-        "train_counts": [10_000, 10_000],
-        "models": {
-            name: {key: bundle[key] for key in ("method", "threshold")}
-            for name, bundle in bundles.items()
-        },
-        "splits": {
-            key: data.iloc[idx].order_id.tolist()
-            for key, idx in {
-                "train": train_idx,
-                "test": test_idx,
-            }.items()
-        },
-    }
-    (output / "manifest.json").write_text(
-        json.dumps(manifest, indent=2), encoding="utf-8"
-    )
-    prepare_orders(test_features.head(20)).to_csv(
-        output / "example_orders.csv", index=False
-    )
-    print(
-        f"Saved models and reproducible splits: {output.resolve()}", flush=True
-    )
+        restored = predict_late(joblib.load(path), test)
+        original = predict_late(bundle, test)
+        np.testing.assert_allclose(original[["p_late", "risk_score"]],
+                                   restored[["p_late", "risk_score"]], rtol=1e-12, atol=1e-14)
+        np.testing.assert_array_equal(original.predicted_label, restored.predicted_label)
+    history_columns = ["order_id", "order_delivered_customer_date",
+                       "order_estimated_delivery_date", "is_late", "delay_days"]
+    joblib.dump(dict(train=fit[history_columns],
+                     links=links.loc[links.order_id.isin(fit.order_id)]),
+                output / "seller_history.joblib")
+    manifest = dict(format_version=BUNDLE_VERSION, seed=SEED,
+                    available_at=available_at, config=config,
+                    train_counts=[10_000, 10_000],
+                    models={name: {k: bundle[k] for k in ("method", "threshold")}
+                            for name, bundle in bundles.items()},
+                    splits={name: part.order_id.tolist() for name, part in parts.items()},
+                    counts={name: dict(orders=len(part), late=int(part.is_late.sum()),
+                                       late_rate=float(part.is_late.mean()))
+                            for name, part in parts.items()})
+    metrics = pd.DataFrame(records)
+    predicted = pd.concat(predictions, ignore_index=True)
+    metrics.to_csv(output / "metrics.csv", index=False)
+    predicted.to_csv(output / "predictions.csv", index=False)
+    prepare_orders(test.head(20)).to_csv(output / "example_orders.csv", index=False)
+    (output / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return manifest, metrics, predicted
+
+
+def train(output_dir):
+    engine = get_engine()
+    try:
+        with engine.connect().execution_options(isolation_level="REPEATABLE READ") as connection:
+            data, links = load_orders(connection)
+    finally:
+        engine.dispose()
+    manifest, _, _ = fit_models(data, links, output_dir)
     return manifest
 
 

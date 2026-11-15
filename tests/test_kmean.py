@@ -13,6 +13,7 @@ import pandas as pd
 
 from src.ml.kmean import build_rfm, name_clusters, run_kmeans
 from src.ml.kmean import load_orders, validate_orders
+from src.ml.kmean import save_csv, save_snapshot_metadata, load_snapshot
 
 
 def make_orders():
@@ -33,6 +34,12 @@ class KmeansTests(unittest.TestCase):
         try:
             with engine.begin() as conn:
                 conn.exec_driver_sql("ATTACH DATABASE ':memory:' AS dw")
+                conn.exec_driver_sql("ATTACH DATABASE ':memory:' AS staging")
+                conn.exec_driver_sql("CREATE TABLE staging.orders_typed "
+                                     "(order_id TEXT, order_delivered_customer_date TEXT)")
+                conn.exec_driver_sql("INSERT INTO staging.orders_typed VALUES "
+                                     "('start', '2017-01-05 00:00:00.000000'), "
+                                     "('end', '2019-01-01 00:00:00.000000')")
                 conn.exec_driver_sql(
                     "CREATE TABLE dw.dim_customer "
                     "(customer_key INTEGER, customer_unique_id TEXT)"
@@ -65,6 +72,8 @@ class KmeansTests(unittest.TestCase):
                 )
             orders = load_orders(engine, 2017, 2018)
             self.assertEqual(set(orders["order_id"]), {"start", "end"})
+            snapshot = load_orders(engine, 2017, 2018, as_of="2019-01-01")
+            self.assertEqual(snapshot.order_id.tolist(), ["start"])
             for start, end in [(2018, 2017), (0, 2018), (2017, 9999)]:
                 with self.assertRaises(ValueError):
                     load_orders(engine, start, end)
@@ -121,6 +130,21 @@ class KmeansTests(unittest.TestCase):
         orders = make_orders()
         with self.assertRaises(ValueError):
             validate_orders(pd.concat([orders, orders.iloc[:1]]))
+
+    def test_snapshot_metadata_and_reference_date(self):
+        rfm = build_rfm(make_orders(), as_of="2019-01-01")
+        self.assertEqual(rfm.loc["u4", "recency_days"], 275)
+        with self.assertRaises(ValueError):
+            build_rfm(make_orders(), as_of="2018-04-01")
+        with tempfile.TemporaryDirectory() as directory:
+            path = save_csv(rfm, Path(directory) / "snapshot.csv")
+            with self.assertRaises(ValueError):
+                load_snapshot(path)
+            save_snapshot_metadata(path, "2019-01-01", 2018, 2018)
+            self.assertIn("snapshot", load_snapshot(path).attrs)
+            path.write_text("tampered", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_snapshot(path)
 
     def test_labels_match_four_cluster_reference(self):
         profile = pd.DataFrame({

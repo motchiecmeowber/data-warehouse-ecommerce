@@ -1,6 +1,6 @@
 # Thiết kế ML
 
-Phạm vi ML gồm phân cụm khách hàng và dự đoán review tốt hoặc xấu.
+Phạm vi ML gồm phân cụm khách hàng và dự đoán nguy cơ giao trễ.
 Chạy notebook thực nghiệm trước, sau đó triển khai trong repo dựa trên kết quả đã chọn.
 
 ## Phân cụm khách hàng
@@ -42,44 +42,49 @@ cụm 2 mua lại; cụm 3 chi tiêu cao. Cần chạy lại trên DW để xác
 CSV gồm customer_unique_id, recency_days, frequency, monetary,
 avg_order_value, kmeans_cluster và kmeans_segment.
 
-## Dự đoán review tốt/xấu
+## Dự đoán giao trễ tại thời điểm đặt hàng
 
-Chạy `python -m src.ml.review_quality` từ thư mục repo sau khi cấu hình `DATABASE_URL`.
+Module `src/ml/late_risk.py`; chạy `python -m src.ml.late_risk --output-dir artifacts/models/late_risk/run_02`.
+Cần DATABASE_URL, staging và DW đã ETL. `fit_models(data, links, output_dir)` là pipeline dùng chung với script báo cáo.
 
-Dùng Gradient Boosting với `max_depth=8` và `min_samples_split=5`, cùng Logistic
-Regression và Random Forest để đối chiếu. Cả ba cân bằng trọng số theo tần suất lớp
-trong tập train. Cách gán nhãn và tham số GBDT lấy từ [notebook của Sourav Barik](https://www.kaggle.com/code/souravbarik/customer-satisfaction-using-olist-dataset).
+`configs/ml.yaml` quy định ba khoảng nửa mở: train [2017-01-01, 2018-02-01),
+calibration [2018-02-01, 2018-05-01), test [2018-05-01, 2018-09-01).
+Train/calibration chỉ nhận kết quả có max(ngày giao, ngày hẹn) nhỏ hơn mốc kết thúc của tập.
+Test chỉ dùng đơn có nhãn và giữ tỷ lệ lớp tự nhiên. Không lấy mẫu test theo tỷ lệ 50:50.
 
-Mốc dự đoán là lúc giao xong. Mỗi đơn lấy review hợp lệ đầu tiên nếu review đó xuất
-hiện sau lúc giao. Review 1–2 sao là nhãn `0` (xấu), 4–5 sao là nhãn `1` (tốt).
-Đơn có review 3 sao bị loại khỏi dữ liệu train và test.
+Mười feature chỉ dùng thông tin có tại lúc mua: khoảng cách, cước, thời gian hẹn giao,
+thứ/tháng mua, chỉ số kích thước/khối lượng, danh mục, ba thống kê lịch sử seller.
+Seller history chỉ lấy từ tập train, với known_at nhỏ hơn thời điểm mua từng đơn;
+nguồn lịch sử được đóng băng cho cả calibration/test, seller mới nhận 0.
 
-Tám feature gồm `estimated_workdays`, `actual_workdays`,
-`delivery_workday_delta`, `is_late`, `average_product_value`, `total_order_value`,
-`freight_ratio`, `purchase_weekday`. Ngày làm việc tính thứ Hai đến thứ Sáu,
-chưa trừ ngày lễ Brazil. Giá trị hàng/cước và số sản phẩm lấy từ fact đơn hàng;
-giá sản phẩm trung bình bằng `order_revenue / item_count`.
+Giữ ba model với tham số cố định của thực nghiệm cũ (LR C=0.001; RF 300 cây;
+LightGBM 100 vòng). Chỉ train được cân bằng 10.000 đúng hạn + 10.000 trễ:
+LR dùng SMOTE, RF/LightGBM dùng SMOTENC. Encoder/scaler chỉ fit train.
+Sigmoid calibration dùng FrozenEstimator để không fit lại model; dữ liệu calibration
+không resample. Ngưỡng nhãn tối đa F1 trên calibration, hòa lấy ngưỡng lớn hơn.
+Không dùng test để chọn model, calibration hay ngưỡng.
 
-DW chỉ giữ khóa ngày giao và ngày trả lời review, nên ghép timestamp chính xác
-từ `staging.orders` và `staging.order_reviews` để tránh thay đổi cách lọc/chia tập.
-Cần nạp cả staging và DW trước khi chạy; các fact phải tổng hợp đủ dòng hàng sạch.
-20% đơn giao mới nhất làm test, các đơn cùng timestamp ở cùng một tập.
-Train chỉ dùng review đã biết trước mốc test. Mỗi tập phải có đủ hai lớp.
-Đánh giá bằng accuracy, macro F1, ROC AUC và precision, recall, F1 của lớp xấu.
-Baseline luôn đoán lớp phổ biến nhất trong tập train.
+`predict_late(bundle, orders)` trả order_id, risk_score (điểm thô), p_late (đã hiệu chỉnh),
+threshold và predicted_label. Model cũ thiếu calibration bị từ chối, cần train lại.
+Manifest phiên bản 2 lưu cấu hình, ID/count/tỷ lệ lớp từng tập, available_at=2018-05-01.
+Model chỉ dùng cho ngày từ available_at; đây là thời điểm sẵn sàng trong mô phỏng lịch sử,
+không phải ngày thực thi máy tính.
 
-Mỗi lần chạy lưu vào thư mục riêng `artifacts/models/review_quality/<run_id>/`.
+Mỗi run ghi ba bundle joblib, seller_history.joblib, manifest.json, metrics.csv,
+predictions.csv và example_orders.csv vào thư mục mới. Metrics gồm ROC-AUC,
+average precision và baseline tỷ lệ trễ, precision/recall/F1/confusion matrix,
+Brier score và log loss trước/sau calibration. Script báo cáo thêm reliability diagram.
+Calibration không bảo đảm hết sai lệch khi tỷ lệ trễ thay đổi theo thời gian.
 
-- `logistic_regression.joblib`: lưu cả StandardScaler, one-hot thứ trong tuần và model.
-- `random_forest.joblib` và `gradient_boosting.joblib` lưu model riêng cho từng thuật toán.
-- `metrics.csv`, `classification_report.csv`, `predictions.csv`, `run.json`.
+## Snapshot K-Means cho DSS
 
-Chỉ công bố thư mục kết quả sau khi ghi đủ cả ba model và các bảng đánh giá.
+Phân tích khám phá trên dashboard giữ cách gọi theo năm. Mô phỏng DSS phải dùng:
 
-```python
-import joblib
-from src.ml.review_quality import predict_review
-
-model = joblib.load("artifacts/models/review_quality/<run_id>/gradient_boosting.joblib")
-predictions = predict_review(model, orders)  # order_id, prediction_at và tám feature ở trên
+```bash
+python -m src.ml.kmean --start-year 2017 --end-year 2017 --as-of 2018-01-01
 ```
+
+Chỉ dùng đơn mua trong năm đã chọn, đã giao trước as_of; Recency tham chiếu as_of.
+CSV có metadata JSON cùng tên, chứa cutoff và SHA256 để phát hiện CSV không khớp.
+Dùng `load_snapshot(path)` khi truyền segments cho DSS. CSV khám phá không có metadata
+không được dùng cho mô phỏng lịch sử.

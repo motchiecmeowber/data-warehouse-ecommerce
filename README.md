@@ -70,18 +70,12 @@ data-warehouse-ecommerce/
 │   │   └── queries/                 # ROLLUP, CUBE, drill-down, slice/dice
 │   │
 │   ├── ml/                          # Lớp dự đoán
-│   │   ├── datasets.py              # Lấy dữ liệu từ dw, chia train/test theo thời gian
-│   │   ├── features/                # Feature cấp đơn hàng và người bán (chống leakage)
-│   │   ├── models/                  # Rủi ro giao trễ, thời gian giao, phân cụm tuyến
-│   │   ├── train.py
-│   │   ├── evaluate.py
-│   │   └── predict.py
+│   │   ├── late_risk.py             # Chia thời gian, fit/calibrate, predict và metrics
+│   │   ├── kmean.py                 # RFM/K-Means và snapshot as_of cho DSS
+│   │   └── features/               # Các module đặc trưng
 │   │
-│   ├── dss/                         # Lớp ra quyết định
-│   │   ├── decision_model.py
-│   │   ├── whatif.py
-│   │   ├── sensitivity.py
-│   │   └── recommend.py
+│   ├── dss/
+│   │   └── whatif.py                # Chấm điểm, chọn đơn, what-if, độ nhạy, đối chứng
 │   │
 │   └── app/                         # Dashboard + giao diện DSS (Streamlit)
 │       ├── app.py
@@ -160,9 +154,11 @@ Lưu ý trên macOS:
    streamlit run src/app/app.py
    ```
 
-DSS xếp hạng đơn theo lợi ích can thiệp kỳ vọng, dùng điểm predict_proba của model,
+DSS xếp hạng đơn theo lợi ích can thiệp kỳ vọng, dùng xác suất đã hiệu chỉnh của model,
 nhóm khách K-Means và năng lực xử lý trong ngày. Xem [hướng dẫn train và chạy
 kịch bản](docs/dss_design.md).
+
+Pipeline DSS chia train/calibration/test theo thời gian trong `configs/ml.yaml`; model và snapshot cũ phải tạo lại. Notebook bên dưới là thực nghiệm tái lập paper riêng, không phải pipeline cung cấp xác suất cho DSS.
 
 ## Notebook đánh giá giao trễ
 

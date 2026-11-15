@@ -15,6 +15,8 @@ from sqlalchemy import text
 from src.common.db import get_engine
 from src.ml.late_risk import MODEL_NAMES, load_orders, predict_late
 from src.ml.late_risk import seller_history
+from src.ml.late_risk import BUNDLE_VERSION
+from src.ml.kmean import load_snapshot
 
 UNKNOWN = "Chưa phân nhóm"
 REVIEW_QUERY = """
@@ -36,6 +38,21 @@ GROUP BY f.is_late ORDER BY f.is_late
 
 def score_orders(model_dir, orders, segments, factors):
     """Score once per model, before evaluating any intervention scenarios."""
+    start = pd.to_datetime(orders.order_purchase_timestamp).min()
+    if pd.isna(start) or orders.empty:
+        raise ValueError("Need dated orders for historical scoring")
+    snapshot = segments.attrs.get("snapshot", {})
+    as_of = pd.Timestamp(snapshot.get("as_of"))
+    if pd.isna(as_of) or as_of > start:
+        raise ValueError("Missing or future K-Means snapshot; regenerate with --as-of")
+    manifest = json.loads((Path(model_dir) / "manifest.json").read_text(encoding="utf-8"))
+    available = pd.Timestamp(manifest.get("available_at"))
+    if (manifest.get("format_version") != BUNDLE_VERSION
+            or pd.isna(available) or available > start):
+        raise ValueError("Legacy/future model artifact; retrain before the decision day")
+    used = set(manifest["splits"]["train"]) | set(manifest["splits"]["calibration"])
+    if orders.order_id.isin(used).any():
+        raise ValueError("Decision orders overlap train/calibration")
     metadata = orders[["order_id", "customer_unique_id"]].merge(
         segments[["customer_unique_id", "kmeans_segment"]],
         how="left",
@@ -62,6 +79,8 @@ def score_orders(model_dir, orders, segments, factors):
     frames = []
     for name in MODEL_NAMES:
         bundle = joblib.load(Path(model_dir) / f"{name}.joblib")
+        if pd.Timestamp(bundle.get("available_at")) != available:
+            raise ValueError("Bundle availability differs from manifest; retrain")
         scores = predict_late(bundle, orders)[["order_id", "p_late"]]
         frames.append(
             metadata.merge(scores, validate="one_to_one").assign(model=name)
@@ -71,6 +90,11 @@ def score_orders(model_dir, orders, segments, factors):
 
 def evaluate(scores, loss, cost, efficacy, capacity=None):
     """Rank candidates for one decision day, separately for each model."""
+    if (scores.empty or scores[["order_id", "model"]].isna().any().any()
+            or scores.duplicated(["model", "order_id"]).any()
+            or not np.isfinite(scores[["p_late", "factor"]].to_numpy(float)).all()
+            or not scores.p_late.between(0, 1).all() or scores.factor.lt(0).any()):
+        raise ValueError("Need unique orders per model, probabilities in [0,1], and nonnegative factors")
     if not np.isfinite([loss, cost, efficacy]).all() or min(loss, cost) < 0:
         raise ValueError("Loss and cost must be finite and nonnegative")
     if not 0 <= efficacy <= 1:
@@ -195,7 +219,37 @@ def run_whatif(scores, links, loss, costs, efficacies, capacities):
         "sellers": by_group(data, links, "seller_id"),
         "routes": by_group(data, routes, "route"),
         "sensitivity": sensitivity(scores, loss, *scenarios[0]),
+        "segment_coverage": segment_coverage(scores),
+        "segment_ablation": segment_ablation(scores, loss, scenarios),
     }
+
+
+def segment_coverage(scores):
+    frames = []
+    for model, group in scores.groupby("model"):
+        matched = group.kmeans_segment.ne(UNKNOWN) if "kmeans_segment" in group else pd.Series(False, index=group.index)
+        frames.append(dict(model=model, orders=len(group), matched=int(matched.sum()),
+                           unmatched=int((~matched).sum()), matched_rate=float(matched.mean()),
+                           nonunit_factor=int(group.factor.ne(1).sum()),
+                           nonunit_factor_rate=float(group.factor.ne(1).mean())))
+    return pd.DataFrame(frames)
+
+
+def segment_ablation(scores, loss, scenarios):
+    rows = []
+    for cost, efficacy, capacity in scenarios:
+        actual = evaluate(scores, loss, cost, efficacy, capacity)
+        neutral = evaluate(scores.assign(factor=1.0), loss, cost, efficacy, capacity)
+        for model in scores.model.unique():
+            a = actual.loc[actual.model.eq(model) & actual.selected]
+            b = neutral.loc[neutral.model.eq(model) & neutral.selected]
+            rows.append(dict(model=model, cost=cost, efficacy=efficacy, capacity=capacity,
+                             selected=len(a), neutral_selected=len(b), net=float(a.net.sum()),
+                             neutral_net=float(b.net.sum()), delta_net=float(a.net.sum()-b.net.sum()),
+                             changed_orders=len(set(a.order_id) ^ set(b.order_id)),
+                             selected_ids=json.dumps(a.order_id.tolist()),
+                             neutral_selected_ids=json.dumps(b.order_id.tolist())))
+    return pd.DataFrame(rows)
 
 
 def main():
@@ -235,7 +289,7 @@ def main():
     scores = score_orders(
         args.model_dir,
         orders,
-        pd.read_csv(args.segments, dtype="string"),
+        load_snapshot(args.segments),
         json.loads(args.factors.read_text(encoding="utf-8-sig")),
     )
     results = run_whatif(
