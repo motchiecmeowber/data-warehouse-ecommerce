@@ -92,12 +92,12 @@ def test_ml_intervention_page_runs_p3_models():
     assert_clean(at)
     picked = _metric(at, "Đơn nên can thiệp")
     assert 0 < picked <= 20                                     # năng lực mặc định 20 đơn/ngày
-    assert any(m.label == "Đơn có nhóm khách" for m in at.metric)   # có phần ảnh hưởng của K-Means
-    at.toggle(key="dss_use_segments").set_value(False).run()    # bỏ nhóm khách: mọi hệ số bằng 1
+    assert any(m.label == "Đơn có nhóm khách" for m in at.metric)
+    at.toggle(key="dss_use_segments").set_value(False).run()
     assert_clean(at)
     assert not any(m.label == "Đơn có nhóm khách" for m in at.metric)
     at.toggle(key="dss_use_segments").set_value(True).run()
-    at.toggle(key="dss_unlimited").set_value(True).run()        # không giới hạn số đơn
+    at.toggle(key="dss_unlimited").set_value(True).run()
     assert_clean(at)
     assert _metric(at, "Đơn nên can thiệp") >= picked
     at.number_input(key="dss_cost").set_value(1000.0).run()     # chi phí rất cao: không đơn nào đáng can thiệp

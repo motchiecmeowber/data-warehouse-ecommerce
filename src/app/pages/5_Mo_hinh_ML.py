@@ -12,7 +12,6 @@ from src.app.components.kpi import inject_css, kpi, panel
 from src.common.db import get_engine
 from src.ml.kmean import run_kmeans
 
-# Thứ tự hiển thị các nhóm (tên nhóm do kmean.py gán theo trung vị RFM của từng cụm)
 ORDER = ["Khách mua lại", "Khách chi tiêu cao nhất", "Khách chi tiêu cao", "Khách chi tiêu thấp", "Khách lâu chưa mua"]
 COLUMNS = {"customer_unique_id": "Mã khách", "kmeans_segment": "Nhóm khách", "recency_days": "Số ngày từ lần mua cuối",
            "frequency": "Số đơn", "monetary": "Tổng chi tiêu (R$)", "avg_order_value": "Giá trị đơn TB (R$)"}
@@ -28,9 +27,8 @@ with panel("intro"):
     c2.markdown(":material/flag: **Mục đích**\n\nBiết khách thuộc nhóm nào để ưu tiên giữ chân và chăm sóc phù hợp.")
     c3.markdown(":material/link: **Dùng ở đâu**\n\nTrang *DSS chọn đơn can thiệp (ML)* nhân thiệt hại khi trễ theo nhóm khách.")
 
-# --- Đầu vào: chỉ chạy khi bấm nút vì K-Means trên toàn bộ khách mất vài giây
-# Dùng st.form để đổi năm không chạy lại trang (nếu không, nội dung bên phải bị mờ đi mỗi lần bấm +/-).
-# Bỏ viền form và ẩn dòng gợi ý "Press Enter to submit form" vì nó đè lên ô số trong thanh bên hẹp.
+# --- Đầu vào: chỉ chạy K-Means khi bấm nút. Dùng form để đổi năm không chạy lại trang;
+# ẩn dòng gợi ý "Press Enter" vì nó đè lên ô số trong thanh bên hẹp.
 st.html('<style>[data-testid="stSidebar"] [data-testid="InputInstructions"] { display: none; }</style>')
 st.sidebar.header("Khoảng dữ liệu")
 with st.sidebar.form("customer_clustering", border=False):
@@ -61,7 +59,7 @@ if "customer_segments" not in st.session_state:
     st.info("Chọn khoảng năm ở thanh bên rồi bấm **Phân cụm khách hàng**.", icon=":material/info:")
     st.stop()
 
-from src.app.components import charts  # nạp muộn: Altair nặng, lần mở trang đầu chưa cần
+from src.app.components import charts  # nạp muộn vì Altair nặng
 
 trained_start, trained_end, result = st.session_state["customer_segments"]
 st.subheader(f"Kết quả {trained_start}–{trained_end}")

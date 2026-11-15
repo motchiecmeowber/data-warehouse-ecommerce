@@ -8,7 +8,7 @@ from src.olap.cube import run_query
 
 @st.cache_resource
 def engine():
-    # Tra get_engine lúc gọi (không bind lúc import) để bản vá/mock trong test không bị giữ lại trong module
+    # Tra get_engine lúc gọi để mock trong test không bị giữ lại trong module
     return db.get_engine()
 
 

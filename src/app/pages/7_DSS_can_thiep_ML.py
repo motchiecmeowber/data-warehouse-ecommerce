@@ -100,7 +100,7 @@ def segments(as_of: date) -> pd.DataFrame:
     """Snapshot K-Means tại as_of: chỉ đơn mua và đã giao trước as_of (có file metadata JSON đi kèm CSV)."""
     path = SEGMENTS_DIR / f"segments_asof_{as_of:%Y%m%d}.csv"
     try:
-        return load_snapshot(path)            # dùng lại snapshot đã tính nếu file và metadata khớp
+        return load_snapshot(path)
     except (OSError, ValueError):
         return load_snapshot(run_kmeans(engine(), FIRST_YEAR, as_of.year, output_path=path, as_of=as_of))
 
