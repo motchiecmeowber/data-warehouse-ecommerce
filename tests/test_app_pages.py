@@ -92,10 +92,10 @@ def test_ml_intervention_page_runs_p3_models():
     assert_clean(at)
     picked = _metric(at, "Đơn nên can thiệp")
     assert 0 < picked <= 20                                     # năng lực mặc định 20 đơn/ngày
-    assert any(m.label == "Đơn có nhóm khách" for m in at.metric)
+    assert any(m.label == "Tỷ lệ đơn đã có nhóm khách" for m in at.metric)
     at.toggle(key="dss_use_segments").set_value(False).run()
     assert_clean(at)
-    assert not any(m.label == "Đơn có nhóm khách" for m in at.metric)
+    assert not any(m.label == "Tỷ lệ đơn đã có nhóm khách" for m in at.metric)
     at.toggle(key="dss_use_segments").set_value(True).run()
     at.toggle(key="dss_unlimited").set_value(True).run()
     assert_clean(at)

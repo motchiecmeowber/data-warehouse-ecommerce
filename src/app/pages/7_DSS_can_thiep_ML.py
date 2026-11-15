@@ -256,12 +256,12 @@ if table.empty:
 else:
     view = table.rename(columns={"rank": "Thứ tự", "order_id": "Mã đơn", "kmeans_segment": "Nhóm khách",
                                  "p_late": "Xác suất trễ", "loss_if_late": "Thiệt hại nếu trễ",
-                                 "gross": "Lợi ích nếu can thiệp", "net": "Lợi ích ròng", "selected": "Được chọn"})
+                                 "gross": "Lợi ích gộp (chưa trừ chi phí)", "net": "Lợi ích ròng", "selected": "Được chọn"})
     st.dataframe(view, hide_index=True, height=min(38 + 35 * len(view), 420),
                  alt=f"Các đơn mua ngày {day:%d/%m/%Y} xếp theo lợi ích ròng kỳ vọng nếu can thiệp",
                  column_config={"Xác suất trễ": st.column_config.ProgressColumn(format="percent", min_value=0, max_value=1),
                                 "Thiệt hại nếu trễ": st.column_config.NumberColumn(format="%.1f"),
-                                "Lợi ích nếu can thiệp": st.column_config.NumberColumn(format="%.1f"),
+                                "Lợi ích gộp (chưa trừ chi phí)": st.column_config.NumberColumn(format="%.1f"),
                                 "Lợi ích ròng": st.column_config.NumberColumn(format="%+.1f")})
     st.download_button("Tải danh sách (CSV)", view.to_csv(index=False).encode("utf-8-sig"),
                        file_name=f"don_can_thiep_{day:%Y%m%d}_{model}.csv", mime="text/csv",
@@ -296,10 +296,10 @@ st.subheader("So sánh 3 mô hình")
 st.dataframe(summary.assign(model=summary["model"].map(lambda m: vi("model", m)))[
     ["model", "selected", "total_cost", "avoided_late", "gross", "net"]].rename(columns={
         "model": "Mô hình", "selected": "Đơn được chọn", "total_cost": "Chi phí", "avoided_late": "Đơn trễ tránh được",
-        "gross": "Lợi ích gộp", "net": "Lợi ích ròng"}),
+        "gross": "Lợi ích gộp (chưa trừ chi phí)", "net": "Lợi ích ròng"}),
     hide_index=True, alt="Kết quả của kịch bản đang chọn theo từng mô hình",
     column_config={c: st.column_config.NumberColumn(format="%.1f")
-                   for c in ("Chi phí", "Đơn trễ tránh được", "Lợi ích gộp", "Lợi ích ròng")})
+                   for c in ("Chi phí", "Đơn trễ tránh được", "Lợi ích gộp (chưa trừ chi phí)", "Lợi ích ròng")})
 
 if use_segments:
     st.subheader("Ảnh hưởng của nhóm khách (K-Means)")
@@ -307,13 +307,13 @@ if use_segments:
     abl = base(res["segment_ablation"])
     abl = abl[abl["model"] == model].iloc[0]
     with st.grid(3, gap="small"):
-        kpi("Đơn có nhóm khách", fmt_pct(cov.matched_rate),
+        kpi("Tỷ lệ đơn đã có nhóm khách", fmt_pct(cov.matched_rate),
             help=f"{int(cov.matched):,}/{int(cov.orders):,} đơn của khách đã có trong snapshot K-Means; "
                  f"còn lại thuộc nhóm “{UNKNOWN}”, hệ số 1.")
-        kpi("Đơn đổi do hệ số nhóm", f"{int(abl.changed_orders):,}",
+        kpi("Đơn thay đổi khi dùng nhóm khách", f"{int(abl.changed_orders):,}",
             help=f"Số đơn vào hoặc ra khỏi danh sách so với khi mọi hệ số bằng 1 "
                  f"({int(abl.neutral_selected):,} đơn được chọn nếu bỏ hệ số).")
-        kpi("Chênh lợi ích ròng", f"{abl.delta_net:+,.1f}",
+        kpi("Chênh lệch so với không dùng nhóm khách", f"{abl.delta_net:+,.1f}",
             help="Lợi ích ròng kỳ vọng với hệ số nhóm khách trừ lợi ích khi mọi hệ số bằng 1. Đây là so sánh hai giả định "
                  "thiệt hại, không chứng minh K-Means tạo ra lợi ích thật.")
 
@@ -356,9 +356,11 @@ with st.expander("Đối chiếu với kết quả giao thực tế"):
             hide_index=True, alt="Chỉ số đánh giá ba mô hình trên tập kiểm tra theo thời gian",
             column_config={c: st.column_config.NumberColumn(format="%.3f")
                            for c in ("ROC-AUC", "Average precision", "Brier", "Ngưỡng", "Precision", "Recall", "F1")})
-        st.caption("Average precision so với mức ngẫu nhiên bằng tỷ lệ trễ thực tế; Brier càng nhỏ thì xác suất càng sát "
-                   "thực tế. Precision/Recall/F1 tính tại ngưỡng chọn trên tập hiệu chỉnh; DSS không dùng ngưỡng này "
-                   "mà dùng trực tiếp xác suất.")
+        st.caption("ROC-AUC: khả năng xếp đơn trễ cao hơn đơn đúng hạn (0,5 là ngẫu nhiên, 1 là hoàn hảo). "
+                   "Average precision: độ chính xác khi xếp đơn trễ lên đầu, so với mức ngẫu nhiên bằng tỷ lệ trễ thực tế. "
+                   "Brier: sai số của xác suất, càng nhỏ càng sát thực tế. "
+                   "Ngưỡng, Precision, Recall, F1 tính khi coi đơn có xác suất từ ngưỡng trở lên là trễ; "
+                   "DSS không dùng ngưỡng này mà dùng trực tiếp xác suất.")
 
 split = info.get("config", {}).get("split", {})
 with st.expander("Cách tính và hạn chế"):

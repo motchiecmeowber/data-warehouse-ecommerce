@@ -13,7 +13,7 @@ from src.common.db import get_engine
 from src.ml.kmean import run_kmeans
 
 ORDER = ["Khách mua lại", "Khách chi tiêu cao nhất", "Khách chi tiêu cao", "Khách chi tiêu thấp", "Khách lâu chưa mua"]
-COLUMNS = {"customer_unique_id": "Mã khách", "kmeans_segment": "Nhóm khách", "recency_days": "Số ngày từ lần mua cuối",
+COLUMNS = {"customer_unique_id": "Mã khách", "kmeans_segment": "Nhóm khách", "recency_days": "Ngày từ lần mua cuối",
            "frequency": "Số đơn", "monetary": "Tổng chi tiêu (R$)", "avg_order_value": "Giá trị đơn TB (R$)"}
 
 st.title("Phân cụm khách hàng")
@@ -66,7 +66,8 @@ has_rfm = {"recency_days", "frequency", "monetary"}.issubset(result.columns)
 
 with st.grid(4, gap="small"):
     kpi("Số khách hàng", f"{len(result):,}")
-    kpi("Số nhóm", f"{result['kmeans_segment'].nunique():,}")
+    largest = result["kmeans_segment"].value_counts(normalize=True)
+    kpi("Tỷ trọng nhóm đông nhất", fmt_pct(largest.iloc[0]), help=f"Nhóm “{largest.index[0]}” trong tổng {len(result):,} khách.")
     if has_rfm:
         kpi("Khách mua từ 2 đơn", fmt_pct((result["frequency"] > 1).mean()),
             help="Tỷ lệ khách có nhiều hơn một đơn trong khoảng năm đã chọn.")
@@ -83,7 +84,7 @@ with c1, st.container(border=True):
                            height=300),
                 "Số khách hàng trong từng nhóm K-Means")
 with c2, st.container(border=True):
-    st.markdown("#### Chân dung từng nhóm")
+    st.markdown("#### Chân dung từng nhóm (trung vị)")
     if has_rfm:
         profile = result.groupby("kmeans_segment")[["recency_days", "frequency", "monetary", "avg_order_value"]].median()
         profile = counts.set_index("segment").join(profile).reset_index()
