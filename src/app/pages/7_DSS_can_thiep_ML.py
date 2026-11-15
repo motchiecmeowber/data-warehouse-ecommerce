@@ -50,7 +50,7 @@ except ImportError:
 runs = sorted((p for p in RUNS_DIR.glob("*") if (p / "manifest.json").exists() and (p / "seller_history.joblib").exists()),
               reverse=True)
 if not runs:
-    st.info("Chưa có mô hình đã huấn luyện. Chạy `python -m src.ml.late_risk --output-dir artifacts/models/late_risk/full_fit` "
+    st.info("Chưa có mô hình đã huấn luyện. Chạy `python -m src.ml.late_risk --output-dir artifacts/models/late_risk/temporal_01` "
             "(cần đã chạy ETL), sau đó tải lại trang.", icon=":material/model_training:")
     st.stop()
 

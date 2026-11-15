@@ -86,7 +86,7 @@ Trang này tính từ phân phối thời gian giao thực tế trong kho (`src/
 
 Trang này ra quyết định theo từng đơn, dùng mô hình rủi ro trễ và K-Means của P3 (cách tính: `docs/dss_design.md`). Trang chỉ gọi hàm của P3 và hiển thị:
 
-- Đầu vào: lần huấn luyện (`artifacts/models/late_risk/<run>`, tạo bằng `python -m src.ml.late_risk --output-dir artifacts/models/late_risk/full_fit`), ngày mua của các đơn cần xét, thiệt hại cơ sở, chi phí, hiệu quả và số đơn xử lý được trong ngày, hệ số thiệt hại theo nhóm khách.
+- Đầu vào: lần huấn luyện (`artifacts/models/late_risk/<run>`, tạo bằng `python -m src.ml.late_risk --output-dir artifacts/models/late_risk/temporal_01`), ngày mua của các đơn cần xét, thiệt hại cơ sở, chi phí, hiệu quả và số đơn xử lý được trong ngày, hệ số thiệt hại theo nhóm khách.
 - Dữ liệu: `load_orders(conn, decision_day=...)` đọc đơn trong ngày từ DW, `seller_history` thêm lịch sử người bán từ `seller_history.joblib`. Nhóm khách lấy từ `run_kmeans` trên các đơn từ 2016 đến hết năm trước ngày quyết định (lưu ở `artifacts/kmeans/`), để không dùng dữ liệu tương lai.
 - Tính toán: `score_orders` chấm xác suất trễ một lần cho mỗi mô hình. `run_whatif` chạy kịch bản đang chọn cùng lưới chi phí (×0,5; ×1,5; ×2) × hiệu quả (10% đến 100%), kèm độ nhạy ±20%.
 - Kết quả: KPI của kịch bản đang chọn, danh sách đơn nên can thiệp (tải CSV), bảng nhiệt what-if, biểu đồ độ nhạy, so sánh 3 mô hình, 10 tuyến và 10 người bán có nhiều đơn dự kiến trễ nhất.

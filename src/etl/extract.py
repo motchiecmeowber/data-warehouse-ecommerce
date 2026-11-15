@@ -1,6 +1,6 @@
 """
 Extract: nạp 9 file CSV nguồn và 2 file tham chiếu vào schema staging, giữ nguyên văn mọi giá trị (kiểu TEXT).
-Chạy (ở thư mục gốc): python -m src.etl.extract [--data-dir data/raw]
+Chạy (ở thư mục gốc): python -m src.etl.extract [--data-dir data/sample]
 """
 import argparse
 import csv
