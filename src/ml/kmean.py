@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 from datetime import date
+from typing import cast
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -107,7 +108,7 @@ def build_rfm(orders, as_of=None):
         + pd.Timedelta(days=1)
     )
     if as_of is not None:
-        reference_date = pd.Timestamp(as_of).normalize()
+        reference_date = cast(pd.Timestamp, pd.Timestamp(as_of)).normalize()
         if orders.order_purchase_timestamp.ge(reference_date).any():
             raise ValueError("Snapshot contains purchases at/after as_of")
 
