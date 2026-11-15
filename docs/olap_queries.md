@@ -60,7 +60,7 @@ Mỗi file chạy được bằng `psql -f` hoặc trong tab Truy vấn SQL củ
 | Logistics | Tỷ lệ trễ và thời gian giao theo tháng, bang, tuyến (heatmap người bán × khách), thời gian từng chặng, điểm đánh giá khi giao trễ | `mv_delivery_cube`, `v_fulfillment` |
 | Người bán | Scorecard, top doanh thu, tỷ lệ trễ so với điểm đánh giá, mức tập trung doanh thu | `mv_seller_scorecard` |
 | OLAP explorer | Chọn số đo và phân cấp (roll-up, drill-down bằng cách đổi mức chi tiết), slice, dice bằng bộ lọc, pivot, ROLLUP, tải CSV, xem SQL sinh ra; tab SQL chỉ đọc | `mv_sales_cube` |
-| Phân cụm khách hàng | Phân cụm khách hàng bằng K-Means theo RFM (P3) | `dw` |
+| Phân cụm khách hàng | Phân khách thành 4 nhóm bằng K-Means theo RFM (P3) trong khoảng năm chọn ở thanh bên; số khách theo nhóm, trung vị RFM từng nhóm, danh sách khách, tải CSV | `dw` |
 | DSS ngày hẹn giao | Gợi ý số ngày hẹn theo tuyến × danh mục, what-if, độ nhạy, tuyến cần xem lại | `v_fulfillment`, `v_review` |
 | DSS chọn đơn can thiệp (ML) | Chấm xác suất trễ các đơn mua trong một ngày bằng 3 mô hình của P3, chọn đơn có lợi ích ròng dương trong giới hạn năng lực, what-if theo chi phí × hiệu quả, độ nhạy ±20%, tuyến và người bán rủi ro, đối chiếu thực tế | `dw`, `artifacts/models/late_risk/<run>` |
 
