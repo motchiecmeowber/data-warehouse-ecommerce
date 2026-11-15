@@ -10,7 +10,7 @@ SQL_DIR = Path(__file__).parent / "sql"
 FACTS = ["fact_sales", "fact_order_fulfillment", "fact_payment", "fact_review"]
 
 def load_facts(conn, run_id: int) -> dict[str, int]:
-    settings = {"etl.run_id": run_id}
+    settings: dict[str, object] = {"etl.run_id": run_id}
     for path in sorted(SQL_DIR.glob("2*.sql")):
         execute_sql_file(conn, path, settings)
     return count_rows(conn, "dw", FACTS)
